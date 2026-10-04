@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import enum
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import (
