@@ -121,6 +121,16 @@ class ExamLifecycleHTTPTests(unittest.TestCase):
         create_exam = self.client.post("/api/v1/exams", headers=headers, json={"title": "No"})
         self.assertEqual(create_exam.status_code, 403, create_exam.text)
 
+    def test_signup_cannot_assign_staff_roles(self):
+        for role in ("examiner", "administrator"):
+            response = self.client.post("/api/v1/auth/signup", json={
+                "email": f"{role}@example.test",
+                "password": "StrongPass1!",
+                "role": role,
+            })
+            self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(self.db.query(User).count(), 1)  # only the fixture administrator
+
     def test_refresh_is_single_use_and_logout_revokes_access(self):
         signup = self.client.post("/api/v1/auth/signup", json={
             "email": "tokens@example.test",

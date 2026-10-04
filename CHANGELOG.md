@@ -3,27 +3,19 @@
 ## [0.1.0] — 2026-10-04
 
 ### Added
-- CBT domain engine: questions, exams, attempts, server-side timer, marking, scoring, grading
-- Starlette ASGI HTTP layer
-- Strong authentication: Argon2id hashing, password policy, account lockout, access + refresh tokens
-- Password change, forgot-password, reset-password flows
-- Auth rate limiting and security response headers
-- SQL database support: SQLite, PostgreSQL, and MySQL
-- Structured error system
-- OpenAPI docs at `/docs`
-- CLI (`ecbt create`, `ecbt dev`, `ecbt create-admin`, `ecbt migrate`)
-- Documentation: auth, security, database, guides
+- CBT domain engine: questions, exams, attempts, timers, marking, scoring, grading
+- Starlette HTTP layer (FastAPI-independent)
+- Strong auth: Argon2id, lockout, access + refresh tokens, password policy
+- **Email delivery layer** — provider presets (SMTP, SES, SendGrid, Mailgun, Postmark, Resend, Gmail, Office365)
+- Verification & password-reset emails; tokens never returned in HTTP responses
+- Async mail so signup/reset is not blocked by SMTP
+- Redis-backed shared rate limiting with in-memory fallback
+- Alembic migration support
+- Production configuration validation
+- Multi-database: SQLite, PostgreSQL, MySQL, MongoDB adapter
+- Structured errors, security headers, OpenAPI docs
 
 ### Author
 Emmanuel Emmanuel Etim  
 Email: emmanuel224etim089@gmail.com  
 Repository: https://github.com/emmanuelemmanueletim/ecbtkit
-
-## Unreleased hardening
-
-- Consolidated runtime API on Starlette and removed unused alternate route modules.
-- Limited supported application databases to SQLAlchemy SQL backends.
-- Tightened CORS defaults, response security headers, refresh-token rotation, and reset-token storage.
-- Applied question tags to quota selection, validated quotas, and honored per-question marks.
-- Added database constraints for one active attempt and one answer per attempt/question.
-- Reclassified package maturity as Alpha pending broader verification.

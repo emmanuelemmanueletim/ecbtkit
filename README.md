@@ -113,3 +113,20 @@ eCBTKit (independent)
 ## License
 
 MIT © Emmanuel Emmanuel Etim
+
+
+## Email (simple)
+
+```env
+ECBT_MAIL_ENABLED=true
+ECBT_MAIL_PROVIDER=sendgrid
+ECBT_MAIL_API_KEY=SG.xxx
+ECBT_MAIL_FROM=noreply@yourdomain.com
+ECBT_MAIL_LINK_BASE_URL=https://app.yourdomain.com
+```
+
+See [docs/mail/overview.md](docs/mail/overview.md).
+
+## Production
+
+See [docs/ops/production.md](docs/ops/production.md).

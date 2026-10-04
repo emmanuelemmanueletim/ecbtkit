@@ -13,6 +13,9 @@ from starlette.routing import Mount, Route
 from starlette.responses import HTMLResponse
 
 from ecbtkit.core.config import Settings, get_settings
+from ecbtkit.ops.production import validate_production_settings
+import logging
+_log = logging.getLogger('ecbtkit')
 from ecbtkit.db.base import create_all_tables, init_db
 from ecbtkit.http.routes_auth import auth_routes
 from ecbtkit.http.routes_core import core_routes
@@ -118,6 +121,11 @@ class CBT:
         create_tables: bool = True,
     ):
         self.settings = settings or get_settings()
+        _problems = validate_production_settings(self.settings)
+        for _p in _problems:
+            _log.warning('production.check: %s', _p)
+        if _problems and self.settings.is_production:
+            raise RuntimeError('Unsafe production config: ' + '; '.join(_problems))
         self.settings.validate()
         if create_tables and not self.settings.database_auto_create:
             from sqlalchemy import inspect

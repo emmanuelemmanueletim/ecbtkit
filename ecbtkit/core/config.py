@@ -1,11 +1,11 @@
-﻿"""
-eCBTKit configuration â€” environment-driven, production-minded.
+"""
+eCBTKit configuration — environment-driven, production-minded.
 """
 
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import List
+from typing import List, Optional
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
 
-    # Database â€” supports SQLAlchemy SQL URL schemes
+    # Database — supports SQLAlchemy SQL URL schemes
     # Examples:
     #   sqlite:///./ecbtkit.db
     #   postgresql://user:pass@localhost:5432/ecbt
@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     database_backend: str = "auto"
     database_auto_create: bool = False
 
-    # Security â€” CHANGE secret_key in production
+    # Security — CHANGE secret_key in production
     secret_key: str = Field(
         default="INSECURE-DEV-KEY-change-me-to-64-plus-random-chars",
         min_length=16,
@@ -75,6 +75,32 @@ class Settings(BaseSettings):
     rate_limit_window_seconds: int = 60
     auth_rate_limit_requests: int = 10
     auth_rate_limit_window_seconds: int = 60
+
+    # ---- Email (provider-neutral) ------------------------------------
+    # Set ECBT_MAIL_PROVIDER + keys — framework handles the rest.
+    # Providers: null | smtp | ses | sendgrid | mailgun | postmark | resend | gmail | office365
+    mail_enabled: bool = False
+    mail_provider: str = "null"
+    mail_from: Optional[str] = None
+    mail_from_name: Optional[str] = None
+    mail_host: Optional[str] = None
+    mail_port: Optional[int] = None
+    mail_username: Optional[str] = None
+    mail_password: Optional[str] = None
+    mail_api_key: Optional[str] = None  # SendGrid / Resend / etc.
+    mail_region: Optional[str] = None   # SES region e.g. us-east-1
+    mail_use_tls: Optional[bool] = True
+    mail_use_ssl: bool = False
+    mail_timeout: float = 15.0
+    mail_async: bool = True  # send in background thread — never blocks signup
+    mail_link_base_url: str = "http://127.0.0.1:8000"  # frontend base for reset/verify links
+
+    # ---- Redis (shared rate limiting) --------------------------------
+    redis_url: Optional[str] = None  # e.g. redis://localhost:6379/0
+
+    # ---- Production / ops --------------------------------------------
+    trusted_hosts: List[str] = Field(default_factory=list)
+    force_https: bool = False
 
     # Security headers
     security_headers_enabled: bool = True

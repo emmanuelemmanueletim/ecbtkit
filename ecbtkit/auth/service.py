@@ -35,6 +35,7 @@ from ecbtkit.security.passwords import (
     validate_password_strength,
     verify_password,
 )
+from ecbtkit.mail.service import EmailService
 from ecbtkit.security.tokens import create_token_pair_for_user, decode_token
 
 
@@ -44,6 +45,7 @@ class AuthService:
     def __init__(self, db: Session):
         self.db = db
         self.settings = get_settings()
+        self.mail = EmailService(self.settings)
 
     # ------------------------------------------------------------------
     # Signup
@@ -98,6 +100,14 @@ class AuthService:
             raise ConflictError("An account with this email already exists") from exc
         self.db.refresh(user)
 
+        # Email verification when required
+        if self.settings.require_email_verification and not user.is_verified:
+            vtoken = generate_secure_token(32)
+            user.reset_token_hash = hashlib.sha256(("verify:" + vtoken).encode()).hexdigest()
+            user.reset_token_expires = datetime.utcnow() + timedelta(hours=24)
+            self.db.commit()
+            self.mail.send_verification(to=user.email, token=vtoken, full_name=user.full_name)
+
         tokens = create_token_pair_for_user(user)
         return user, tokens
 
@@ -136,6 +146,11 @@ class AuthService:
         user.refresh_token_jti = secrets.token_urlsafe(24)
         self.db.commit()
         tokens = create_token_pair_for_user(user)
+        if ip:
+            try:
+                self.mail.send_new_signin(to=user.email, ip=ip, full_name=user.full_name)
+            except Exception:
+                pass
         return {
             **tokens,
             "user": {
@@ -185,12 +200,16 @@ class AuthService:
                 Attempt.status == AttemptStatus.ACTIVE,
             ).update({Attempt.status: AttemptStatus.CANCELLED}, synchronize_session=False)
         self.db.commit()
+        try:
+            self.mail.send_password_changed(to=user.email, full_name=user.full_name)
+        except Exception:
+            pass
 
-    def request_password_reset(self, email: str) -> str:
+    def request_password_reset(self, email: str) -> None:
         """
-        Generate a one-time reset token.
-        Always returns a token-shaped string so callers cannot enumerate emails.
-        Applications must deliver the returned token out of band and never return it from an HTTP endpoint.
+        Generate a one-time reset token, store its hash, and email the link.
+        Never returns the token — HTTP layer must not expose it.
+        Always behaves the same whether the email exists or not (no enumeration).
         """
         email = email.strip().lower()
         token = generate_secure_token(32)
@@ -200,8 +219,11 @@ class AuthService:
             user.reset_token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
             user.reset_token_expires = datetime.utcnow() + timedelta(hours=1)
             self.db.commit()
-            return token
-        return generate_secure_token(32)
+            self.mail.send_password_reset(
+                to=user.email,
+                token=token,
+                full_name=user.full_name,
+            )
 
     def reset_password(self, token: str, new_password: str) -> None:
         validate_password_strength(new_password)
