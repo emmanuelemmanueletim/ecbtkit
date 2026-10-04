@@ -144,6 +144,30 @@ class Settings(BaseSettings):
             if "*" in self.cors_origins:
                 raise ValueError("Wildcard CORS origins are not allowed in production")
 
-@lru_cache
+_settings_override: Settings | None = None
+
+
+def set_settings(settings: Settings | None = None) -> Settings:
+    """Install settings for this process (tests and app bootstrap)."""
+    global _settings_override
+    if settings is None:
+        _settings_override = None
+        return Settings()
+    _settings_override = settings
+    return settings
+
+
+def _clear_settings_cache() -> None:
+    global _settings_override
+    _settings_override = None
+
+
+get_settings.cache_clear = _clear_settings_cache  # type: ignore[attr-defined]
+
+
 def get_settings() -> Settings:
-    return Settings()
+    global _settings_override
+    if _settings_override is not None:
+        return _settings_override
+    _settings_override = Settings()
+    return _settings_override

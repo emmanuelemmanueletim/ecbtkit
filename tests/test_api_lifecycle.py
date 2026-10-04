@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from starlette.testclient import TestClient
 
 from ecbtkit.core.app import CBT
-from ecbtkit.core.config import Settings
+from ecbtkit.core.config import Settings, set_settings, get_settings
 from ecbtkit.db.base import get_session_factory
 from ecbtkit.models.attempt import Answer
 from ecbtkit.models.attempt import Attempt, AttemptStatus
@@ -25,7 +25,7 @@ from ecbtkit.security.tokens import create_token_pair_for_user
 
 class ExamLifecycleHTTPTests(unittest.TestCase):
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
+        self.temp_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         db_path = Path(self.temp_dir.name) / "test.db"
         settings = Settings(
             _env_file=None,
@@ -33,6 +33,12 @@ class ExamLifecycleHTTPTests(unittest.TestCase):
             database_auto_create=True,
             cors_origins=[],
         )
+        set_settings(settings)
+        get_settings.cache_clear()
+        set_settings(settings)
+        from ecbtkit.db import base as db_base
+        db_base._engine = None
+        db_base._SessionLocal = None
         self.cbt = CBT(settings)
         self.client = TestClient(self.cbt.app)
         self.db: Session = get_session_factory()()
@@ -55,7 +61,17 @@ class ExamLifecycleHTTPTests(unittest.TestCase):
         from ecbtkit.db import base
         if base._engine:
             base._engine.dispose()
-        self.temp_dir.cleanup()
+        from ecbtkit.db import base as db_base
+        if db_base._engine:
+            db_base._engine.dispose()
+            db_base._engine = None
+            db_base._SessionLocal = None
+        set_settings(None)
+        get_settings.cache_clear()
+        try:
+            self.temp_dir.cleanup()
+        except Exception:
+            pass
 
     def test_candidate_can_take_exam_and_get_score_without_answer_key(self):
         signup = self.client.post("/api/v1/auth/signup", json={

@@ -12,7 +12,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.routing import Mount, Route
 from starlette.responses import HTMLResponse
 
-from ecbtkit.core.config import Settings, get_settings
+from ecbtkit.core.config import Settings, get_settings, set_settings
 from ecbtkit.ops.production import validate_production_settings
 import logging
 _log = logging.getLogger('ecbtkit')
@@ -120,7 +120,7 @@ class CBT:
         title: Optional[str] = None,
         create_tables: bool = True,
     ):
-        self.settings = settings or get_settings()
+        self.settings = set_settings(settings) if settings is not None else get_settings()
         _problems = validate_production_settings(self.settings)
         for _p in _problems:
             _log.warning('production.check: %s', _p)

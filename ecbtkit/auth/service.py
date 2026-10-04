@@ -42,6 +42,20 @@ from ecbtkit.security.tokens import create_token_pair_for_user, decode_token
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _is_expired(expires: Optional[datetime]) -> bool:
+    if expires is None:
+        return True
+    now = _utcnow()
+    # SQLite often returns naive datetimes
+    if expires.tzinfo is None:
+        return expires < now.replace(tzinfo=None)
+    return expires < now
+
+
 
 class AuthService:
     def __init__(self, db: Session, mail: Optional[EmailService] = None):
@@ -103,7 +117,7 @@ class AuthService:
             if not verified:
                 verification_raw = generate_secure_token(32)
                 user.verification_token_hash = _hash_token(verification_raw)
-                user.verification_token_expires = datetime.now(timezone.utc) + timedelta(hours=24)
+                user.verification_token_expires = _utcnow() + timedelta(hours=24)
 
             self.db.commit()
             self.db.refresh(user)
@@ -135,7 +149,7 @@ class AuthService:
         )
         if not user or not user.verification_token_expires:
             raise TokenInvalidError("Invalid or expired verification token")
-        if user.verification_token_expires < datetime.now(timezone.utc):
+        if _is_expired(user.verification_token_expires):
             raise TokenInvalidError("Verification token has expired")
 
         user.is_verified = True
@@ -174,7 +188,7 @@ class AuthService:
             user.hashed_password = hash_password(password)
 
         self._clear_failed_logins(user)
-        user.last_login_at = datetime.now(timezone.utc)
+        user.last_login_at = _utcnow()
         user.refresh_token_jti = secrets.token_urlsafe(24)
         self.db.commit()
 
@@ -249,7 +263,7 @@ class AuthService:
         user = self.db.query(User).filter(User.email == email).first()
         if user:
             user.reset_token_hash = _hash_token(token)
-            user.reset_token_expires = datetime.now(timezone.utc) + timedelta(hours=1)
+            user.reset_token_expires = _utcnow() + timedelta(hours=1)
             self.db.commit()
             self.mail.send_password_reset(
                 to=user.email, token=token, full_name=user.full_name
@@ -263,7 +277,7 @@ class AuthService:
         user = self.db.query(User).filter(User.reset_token_hash == token_hash).first()
         if not user or not user.reset_token_expires:
             raise TokenInvalidError("Invalid or expired reset token")
-        if user.reset_token_expires < datetime.now(timezone.utc):
+        if _is_expired(user.reset_token_expires):
             raise TokenInvalidError("Reset token has expired")
 
         user.hashed_password = hash_password(new_password)
@@ -287,14 +301,14 @@ class AuthService:
     # ------------------------------------------------------------------
 
     def _check_lockout(self, user: User) -> None:
-        if user.locked_until and user.locked_until > datetime.now(timezone.utc):
-            remaining = int((user.locked_until - datetime.now(timezone.utc)).total_seconds() / 60) + 1
+        if user.locked_until and not _is_expired(user.locked_until):
+            remaining = int((user.locked_until - _utcnow()).total_seconds() / 60) + 1
             raise AccountLockedError(minutes=remaining)
 
     def _register_failed_login(self, user: User) -> None:
         user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
         if user.failed_login_attempts >= self.settings.max_login_attempts:
-            user.locked_until = datetime.now(timezone.utc) + timedelta(
+            user.locked_until = _utcnow() + timedelta(
                 minutes=self.settings.lockout_duration_minutes
             )
             user.failed_login_attempts = 0
