@@ -40,13 +40,13 @@ class EmailService:
             f"{link}\n\n"
             f"If you did not create an account, ignore this message.\n"
         )
-        html = self._html_shell(
+        html_body = self._html_shell(
             title="Verify your email",
             body=f"<p>Hi {name},</p><p>Please verify your email:</p>"
                  f'<p><a href="{link}">Verify email</a></p>'
                  f"<p>If you did not sign up, you can ignore this email.</p>",
         )
-        return self._dispatch(to, subject, text, html)
+        return self._dispatch(to, subject, text, html_body)
 
     def send_password_reset(self, *, to: str, token: str, full_name: Optional[str] = None) -> SendResult:
         link = self._link("reset-password", token)
@@ -58,13 +58,13 @@ class EmailService:
             f"{link}\n\n"
             f"If you did not request this, ignore this email.\n"
         )
-        html = self._html_shell(
+        html_body = self._html_shell(
             title="Password reset",
             body=f"<p>Hi {name},</p><p>Reset your password (link expires in 1 hour):</p>"
                  f'<p><a href="{link}">Reset password</a></p>'
                  f"<p>If you did not request this, ignore this email.</p>",
         )
-        return self._dispatch(to, subject, text, html)
+        return self._dispatch(to, subject, text, html_body)
 
     def send_password_changed(self, *, to: str, full_name: Optional[str] = None) -> SendResult:
         name = html.escape(full_name or "there")
@@ -74,24 +74,24 @@ class EmailService:
             f"Your password was changed successfully. "
             f"If you did not do this, reset your password immediately and contact support.\n"
         )
-        html = self._html_shell(
+        html_body = self._html_shell(
             title="Password changed",
             body=f"<p>Hi {name},</p><p>Your password was changed. "
                  f"If this wasn't you, reset it immediately.</p>",
         )
-        return self._dispatch(to, subject, text, html)
+        return self._dispatch(to, subject, text, html_body)
 
     def send_new_signin(self, *, to: str, ip: Optional[str] = None, full_name: Optional[str] = None) -> SendResult:
         name = html.escape(full_name or "there")
         where = f" from IP {ip}" if ip else ""
         subject = f"New sign-in to {self.settings.app_name}"
         text = f"Hi {name},\n\nThere was a new sign-in to your account{where}.\nIf this wasn't you, change your password.\n"
-        html = self._html_shell(
+        html_body = self._html_shell(
             title="New sign-in",
             body=f"<p>Hi {name},</p><p>New sign-in detected{where}. "
                  f"If this wasn't you, change your password.</p>",
         )
-        return self._dispatch(to, subject, text, html)
+        return self._dispatch(to, subject, text, html_body)
 
     # ---- Internals --------------------------------------------------------
 

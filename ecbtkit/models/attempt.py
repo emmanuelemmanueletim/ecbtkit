@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import enum
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import (
@@ -46,7 +46,9 @@ class Attempt(Base):
     __table_args__ = (
         Index(
             "uq_attempt_one_active_per_candidate_exam",
-            "exam_id", "candidate_id", unique=True,
+            "exam_id",
+            "candidate_id",
+            unique=True,
             sqlite_where=sql_text("status = 'ACTIVE'"),
             postgresql_where=sql_text("status = 'ACTIVE'"),
         ),
@@ -85,15 +87,18 @@ class Attempt(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
-    exam = relationship("Exam", back_populates="attempts")
-    candidate = relationship("Candidate", back_populates="attempts")
+    exam: Mapped["Exam"] = relationship("Exam", back_populates="attempts")
+    candidate: Mapped["Candidate"] = relationship("Candidate", back_populates="attempts")
     answers: Mapped[List["Answer"]] = relationship(
         "Answer", back_populates="attempt", cascade="all, delete-orphan"
     )
     result = relationship("Result", back_populates="attempt", uselist=False)
 
     def __repr__(self) -> str:
-        return f"<Attempt id={self.id} exam={self.exam_id} candidate={self.candidate_id} status={self.status}>"
+        return (
+            f"<Attempt id={self.id} exam={self.exam_id} "
+            f"candidate={self.candidate_id} status={self.status}>"
+        )
 
     @property
     def assigned_questions(self) -> List[Dict[str, Any]]:
@@ -106,25 +111,33 @@ class Attempt(Base):
         self.assigned_questions_json = json.dumps(value) if value else None
 
     def is_expired(self, at: Optional[datetime] = None) -> bool:
-        if self.status in (AttemptStatus.SUBMITTED, AttemptStatus.EXPIRED, AttemptStatus.CANCELLED):
-            return self.status == AttemptStatus.EXPIRED
+        if self.status == AttemptStatus.EXPIRED:
+            return True
         if not self.expires_at:
             return False
         now = at or datetime.now(timezone.utc)
-        expires = self.expires_at.replace(tzinfo=None) if self.expires_at.tzinfo else self.expires_at
+        expires = self.expires_at
+        if now.tzinfo is not None and expires.tzinfo is None:
+            now = now.replace(tzinfo=None)
+        elif now.tzinfo is None and expires.tzinfo is not None:
+            expires = expires.replace(tzinfo=None)
         return now >= expires
 
     def remaining_seconds(self, at: Optional[datetime] = None) -> Optional[int]:
         if not self.expires_at or self.status != AttemptStatus.ACTIVE:
             return None
         now = at or datetime.now(timezone.utc)
-        expires = self.expires_at.replace(tzinfo=None) if self.expires_at.tzinfo else self.expires_at
+        expires = self.expires_at
+        if now.tzinfo is not None and expires.tzinfo is None:
+            now = now.replace(tzinfo=None)
+        elif now.tzinfo is None and expires.tzinfo is not None:
+            expires = expires.replace(tzinfo=None)
         delta = (expires - now).total_seconds()
         return max(0, int(delta))
 
 
 class Answer(Base):
-    """A candidate's answer to a specific question within an attempt."""
+    """A candidate's answer to one question within an attempt."""
 
     __tablename__ = "answers"
     __table_args__ = (
@@ -138,13 +151,13 @@ class Answer(Base):
     question_id: Mapped[int] = mapped_column(
         ForeignKey("questions.id", ondelete="CASCADE"), nullable=False, index=True
     )
+
     selected_option_ids: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_correct: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     marks_awarded: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     answered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    attempt = relationship("Attempt", back_populates="answers")
-    question = relationship("Question")
+    attempt: Mapped["Attempt"] = relationship("Attempt", back_populates="answers")
 
     def __repr__(self) -> str:
         return f"<Answer id={self.id} attempt={self.attempt_id} question={self.question_id}>"
@@ -155,12 +168,10 @@ class Answer(Base):
             return []
         try:
             data = json.loads(self.selected_option_ids)
-            if isinstance(data, list):
-                return [int(x) for x in data]
-            return [int(data)]
-        except (json.JSONDecodeError, TypeError, ValueError):
+            return [int(x) for x in data]
+        except (TypeError, ValueError, json.JSONDecodeError):
             return []
 
     @selected_ids.setter
     def selected_ids(self, value: List[int]) -> None:
-        self.selected_option_ids = json.dumps(value) if value else None
+        self.selected_option_ids = json.dumps(list(value)) if value else None

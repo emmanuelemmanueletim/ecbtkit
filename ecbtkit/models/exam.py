@@ -109,8 +109,16 @@ class Exam(Base):
         if self.status != ExamStatus.PUBLISHED:
             return False
         now = at or datetime.now(timezone.utc)
-        if self.available_from and now < self.available_from.replace(tzinfo=None):
-            return False
-        if self.available_until and now > self.available_until.replace(tzinfo=None):
-            return False
+        if now.tzinfo is not None:
+            now_cmp = now.replace(tzinfo=None)
+        else:
+            now_cmp = now
+        if self.available_from:
+            af = self.available_from.replace(tzinfo=None) if self.available_from.tzinfo else self.available_from
+            if now_cmp < af:
+                return False
+        if self.available_until:
+            au = self.available_until.replace(tzinfo=None) if self.available_until.tzinfo else self.available_until
+            if now_cmp > au:
+                return False
         return True
