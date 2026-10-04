@@ -28,30 +28,34 @@ async def signup(request: Request):
     settings = get_settings()
     ip = get_client_ip(request)
     try:
-        limiter.check(client_key(ip, "auth"), limit=settings.auth_rate_limit_requests,
+        limiter.check(client_key(ip, "signup"), limit=settings.auth_rate_limit_requests,
                       window=settings.auth_rate_limit_window_seconds)
         body = await _read_json(request)
         email = body.get("email")
         password = body.get("password")
-        if not email or not password:
+        if not email or not password or len(password) > get_settings().password_max_length:
             raise ValidationError("email and password are required")
         role_str = body.get("role", "candidate")
         try:
             role = UserRole(role_str)
         except ValueError:
             raise ValidationError(f"Invalid role: {role_str}")
-        if role == UserRole.ADMINISTRATOR:
-            role = UserRole.CANDIDATE  # force; first-admin via CLI only
+        if role != UserRole.CANDIDATE:
+            raise ValidationError("Only candidates may self-register")
 
         db = open_db()
         try:
             svc = AuthService(db)
-            user, tokens = svc.signup(
-                email=email,
-                password=password,
-                full_name=body.get("full_name"),
-                role=role,
-            )
+            try:
+                user, tokens = svc.signup(
+                    email=email,
+                    password=password,
+                    full_name=body.get("full_name"),
+                    role=role,
+                )
+            except Exception:
+                db.rollback()
+                raise
             return APIResponse(
                 {
                     **tokens,
@@ -77,12 +81,12 @@ async def login(request: Request):
     settings = get_settings()
     ip = get_client_ip(request)
     try:
-        limiter.check(client_key(ip, "auth"), limit=settings.auth_rate_limit_requests,
+        limiter.check(client_key(ip, "login"), limit=settings.auth_rate_limit_requests,
                       window=settings.auth_rate_limit_window_seconds)
         body = await _read_json(request)
         email = body.get("email")
         password = body.get("password")
-        if not email or not password:
+        if not email or not password or len(password) > settings.password_max_length:
             raise ValidationError("email and password are required")
         db = open_db()
         try:
@@ -131,6 +135,8 @@ async def me(request: Request):
         })
     except ECBTError as exc:
         return error_response(exc)
+    except Exception as exc:
+        return internal_error_response(get_settings().debug, str(exc))
     finally:
         db.close()
 
@@ -148,6 +154,20 @@ async def change_password(request: Request):
         return APIResponse({"message": "Password updated successfully"})
     except ECBTError as exc:
         return error_response(exc)
+    except Exception as exc:
+        return internal_error_response(get_settings().debug, str(exc))
+    finally:
+        db.close()
+
+
+async def logout(request: Request):
+    db = open_db()
+    try:
+        user = get_current_user(request, db)
+        AuthService(db).logout_all(user)
+        return APIResponse({"message": "Sessions revoked"})
+    except ECBTError as exc:
+        return error_response(exc)
     finally:
         db.close()
 
@@ -156,7 +176,7 @@ async def forgot_password(request: Request):
     settings = get_settings()
     ip = get_client_ip(request)
     try:
-        limiter.check(client_key(ip, "auth"), limit=settings.auth_rate_limit_requests,
+        limiter.check(client_key(ip, "forgot-password"), limit=settings.auth_rate_limit_requests,
                       window=settings.auth_rate_limit_window_seconds)
         body = await _read_json(request)
         email = body.get("email")
@@ -164,12 +184,10 @@ async def forgot_password(request: Request):
             raise ValidationError("email is required")
         db = open_db()
         try:
-            token = AuthService(db).request_password_reset(email)
-            # In production: send token via email, never return it.
-            # In debug: return token so developers can test the flow.
+            AuthService(db).request_password_reset(email)
+            # Reset tokens are never returned by the API. Deliver them through
+            # a configured out-of-band email integration in the application.
             payload = {"message": "If that email exists, a reset link has been sent."}
-            if settings.debug:
-                payload["debug_reset_token"] = token
             return APIResponse(payload)
         finally:
             db.close()
@@ -186,6 +204,8 @@ async def reset_password(request: Request):
         new_password = body.get("new_password")
         if not token or not new_password:
             raise ValidationError("token and new_password are required")
+        if len(new_password) > get_settings().password_max_length:
+            raise ValidationError("new_password is too long")
         db = open_db()
         try:
             AuthService(db).reset_password(token, new_password)
@@ -204,6 +224,7 @@ auth_routes = [
     Route("/auth/login", login, methods=["POST"]),
     Route("/auth/refresh", refresh, methods=["POST"]),
     Route("/auth/me", me, methods=["GET"]),
+    Route("/auth/logout", logout, methods=["POST"]),
     Route("/auth/change-password", change_password, methods=["POST"]),
     Route("/auth/forgot-password", forgot_password, methods=["POST"]),
     Route("/auth/reset-password", reset_password, methods=["POST"]),

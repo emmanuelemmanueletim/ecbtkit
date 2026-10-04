@@ -16,10 +16,12 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    Index,
     String,
     Text,
     UniqueConstraint,
     func,
+    text as sql_text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -41,6 +43,14 @@ class Attempt(Base):
     """
 
     __tablename__ = "attempts"
+    __table_args__ = (
+        Index(
+            "uq_attempt_one_active_per_candidate_exam",
+            "exam_id", "candidate_id", unique=True,
+            sqlite_where=sql_text("status = 'ACTIVE'"),
+            postgresql_where=sql_text("status = 'ACTIVE'"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     exam_id: Mapped[int] = mapped_column(

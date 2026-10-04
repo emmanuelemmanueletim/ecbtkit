@@ -44,8 +44,11 @@ class User(Base):
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Password reset
-    reset_token: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    reset_token: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    reset_token_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, unique=True)
     reset_token_expires: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    refresh_token_jti: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     external_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     metadata_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

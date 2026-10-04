@@ -1,6 +1,6 @@
 # eCBTKit
 
-**A production-ready Python framework for CBT & online examination APIs**
+**An early-stage Python framework for CBT & online examination APIs**
 
 > **Build the CBT API, not the CBT engine.**
 
@@ -10,9 +10,9 @@
 **Repository:** https://github.com/emmanuelemmanueletim/ecbtkit  
 **Author email:** emmanuel224etim089@gmail.com  
 
-**Independent of FastAPI** — built on Starlette ASGI.  
+**Starlette ASGI** — no FastAPI dependency.  
 **Strong auth** — Argon2id, lockout, refresh tokens, password policy.  
-**Multi-database** — SQLite, PostgreSQL, MySQL, MongoDB.
+**SQL databases** — SQLite, PostgreSQL, and MySQL through SQLAlchemy.
 
 ---
 
@@ -24,12 +24,13 @@ pip install -e .
 pip install -r requirements.txt
 ```
 
+The project is Alpha. Run `ecbt migrate` before starting the application; tables are not created automatically. `ecbt dev` enables development-only automatic table creation.
+
 Optional drivers:
 
 ```bash
 pip install psycopg2-binary          # PostgreSQL
 pip install pymysql cryptography     # MySQL
-pip install pymongo                  # MongoDB
 ```
 
 ## Quick start
@@ -78,10 +79,11 @@ ECBT_DATABASE_URL=postgresql://user:pass@localhost:5432/ecbt
 # MySQL
 ECBT_DATABASE_URL=mysql://user:pass@localhost:3306/ecbt
 
-# MongoDB
-ECBT_DATABASE_URL=mongodb://localhost:27017/ecbt
-ECBT_DATABASE_BACKEND=mongo
 ```
+
+The examination engine currently supports SQL databases only. MongoDB is not a supported application backend. Set `ECBT_CORS_ORIGINS` to a comma-separated allowlist when browser clients need cross-origin access; credentials are disabled by default.
+
+**Maturity:** Alpha. Run multiple workers only with PostgreSQL/MySQL and a shared rate limiter at the proxy or gateway. Password reset creates a one-time token, but applications must deliver it through their email system; this package does not send email.
 
 ## Examination engine
 
@@ -104,8 +106,8 @@ eCBTKit (independent)
 ├── Domain engine (no HTTP)
 ├── Auth service (no HTTP)
 ├── Security (passwords, tokens, rate limit, headers)
-├── DB adapters (SQLAlchemy · Mongo)
-└── HTTP layer (Starlette ASGI — not FastAPI)
+├── SQL persistence (SQLAlchemy)
+└── HTTP layer (Starlette ASGI)
 ```
 
 ## License

@@ -11,9 +11,7 @@ rich>=13.7.0
 python-dotenv>=1.0.0
 argon2-cffi>=23.1.0
 
-# Optional databases — install what you need
+# Optional SQL database drivers
 # psycopg2-binary>=2.9.9      # PostgreSQL
 # pymysql>=1.1.0              # MySQL
 # cryptography>=41.0.0        # MySQL SSL / extras
-# pymongo>=4.6.0              # MongoDB
-# redis>=5.0.0                # rate-limit / token blacklist

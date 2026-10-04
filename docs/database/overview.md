@@ -21,26 +21,14 @@ Also accepted:
 ECBT_DATABASE_URL=postgresql://ecbt:secret@db:5432/ecbt
 ```
 
-## MongoDB (optional)
-
-```bash
-pip install pymongo
-```
-
-```env
-ECBT_DATABASE_URL=mongodb://localhost:27017/ecbt
-ECBT_DATABASE_BACKEND=mongo
-```
-
-Mongo is available via `ecbtkit.adapters.mongo.get_mongo_db()`.  
-The full relational exam engine (attempts, FKs, transactions) is optimized for the **SQL** path. Use Mongo for document-oriented question banks or analytics stores when needed.
+MongoDB is not currently supported as an application backend. The exam and attempt services depend on SQL transactions and relational constraints.
 
 ## Auto detection
 
 ```env
-ECBT_DATABASE_BACKEND=auto   # default — inspects URL scheme
+ECBT_DATABASE_BACKEND=auto   # detects SQL URL schemes
 ```
 
 ## Transactions
 
-Critical operations (submit attempt, mark, create result) run inside SQL transactions so you never get a score without a result row (or the reverse).
+Critical operations (submit attempt, mark, create result) run inside SQL transactions. A unique constraint prevents duplicate result rows, answer keys prevent duplicate answer rows, and a partial unique index prevents more than one active attempt per candidate and exam.

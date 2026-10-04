@@ -15,6 +15,8 @@
 - Short-lived access tokens + refresh tokens  
 - Rate limiting on auth routes  
 - No email enumeration on login / forgot-password  
+- Single-use rotated refresh tokens; password changes invalidate issued tokens  
+- Reset tokens are stored as hashes and never returned from HTTP endpoints  
 
 ## Transport & headers
 
@@ -34,6 +36,8 @@ Set explicit origins in production:
 ECBT_CORS_ORIGINS=https://app.example.com
 ```
 
+The default origin list is empty and credentialed CORS is disabled. In production, wildcard origins are rejected at startup.
+
 ## Examination integrity
 
 - Candidates cannot access another candidate’s attempt or result  
@@ -49,4 +53,5 @@ ECBT_CORS_ORIGINS=https://app.example.com
 - [ ] PostgreSQL or MySQL (not SQLite)  
 - [ ] HTTPS termination  
 - [ ] Restricted CORS origins  
+- [ ] Use a shared gateway rate limiter for multi-worker deployments  
 - [ ] Email delivery for password-reset tokens (do not return tokens in API responses)  

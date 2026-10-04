@@ -151,6 +151,12 @@ class ValidationError(ECBTError):
         super().__init__(message, "VALIDATION_ERROR", details, 422)
 
 
+class InvalidSelectionRulesError(ValidationError):
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.code = "INVALID_SELECTION_RULES"
+
+
 # ---- Exam lifecycle -------------------------------------------------------
 
 class ExamNotPublishedError(ECBTError):

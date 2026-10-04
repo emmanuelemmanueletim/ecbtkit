@@ -16,7 +16,7 @@ from ecbtkit.core.config import Settings, get_settings
 from ecbtkit.db.base import create_all_tables, init_db
 from ecbtkit.http.routes_auth import auth_routes
 from ecbtkit.http.routes_core import core_routes
-from ecbtkit.http.responses import APIResponse
+from ecbtkit.http.responses import APIResponse, SecurityHeadersMiddleware
 
 
 DOCS_HTML = """<!DOCTYPE html>
@@ -25,6 +25,7 @@ DOCS_HTML = """<!DOCTYPE html>
   <title>{title} — API Docs</title>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
 </head>
 <body>
@@ -50,12 +51,7 @@ def _build_openapi(settings: Settings) -> dict:
         "info": {
             "title": settings.app_name,
             "version": settings.app_version,
-            "description": (
-                "eCBTKit — CBT & Online Examination API Framework\n\n"
-                "**Author:** Emmanuel Emmanuel Etim\n\n"
-                "Authenticate via `POST /api/v1/auth/login`, then click Authorize "
-                "and paste: `Bearer <access_token>`."
-            ),
+            "description": "Starlette based CBT and online examination API. Authenticate with a bearer access token.",
         },
         "servers": [{"url": settings.api_prefix}],
         "components": {
@@ -72,9 +68,11 @@ def _build_openapi(settings: Settings) -> dict:
             "/health": {"get": {"tags": ["Health"], "summary": "Health check", "security": [], "responses": {"200": {"description": "OK"}}}},
             "/health/database": {"get": {"tags": ["Health"], "summary": "Database health", "security": [], "responses": {"200": {"description": "OK"}}}},
             "/auth/signup": {"post": {"tags": ["Authentication"], "summary": "Sign up", "security": [], "responses": {"201": {"description": "Created"}}}},
+            "/auth/register": {"post": {"tags": ["Authentication"], "summary": "Register alias", "security": [], "responses": {"201": {"description": "Created"}}}},
             "/auth/login": {"post": {"tags": ["Authentication"], "summary": "Login", "security": [], "responses": {"200": {"description": "Tokens"}}}},
             "/auth/refresh": {"post": {"tags": ["Authentication"], "summary": "Refresh tokens", "security": [], "responses": {"200": {"description": "Tokens"}}}},
             "/auth/me": {"get": {"tags": ["Authentication"], "summary": "Current user", "responses": {"200": {"description": "User"}}}},
+            "/auth/logout": {"post": {"tags": ["Authentication"], "summary": "Revoke sessions", "responses": {"200": {"description": "OK"}}}},
             "/auth/change-password": {"post": {"tags": ["Authentication"], "summary": "Change password", "responses": {"200": {"description": "OK"}}}},
             "/auth/forgot-password": {"post": {"tags": ["Authentication"], "summary": "Request password reset", "security": [], "responses": {"200": {"description": "OK"}}}},
             "/auth/reset-password": {"post": {"tags": ["Authentication"], "summary": "Reset password with token", "security": [], "responses": {"200": {"description": "OK"}}}},
@@ -87,6 +85,7 @@ def _build_openapi(settings: Settings) -> dict:
                 "get": {"tags": ["Questions"], "summary": "List questions", "responses": {"200": {"description": "OK"}}},
                 "post": {"tags": ["Questions"], "summary": "Create question", "responses": {"201": {"description": "Created"}}},
             },
+            "/questions/{question_id}": {"get": {"tags": ["Questions"], "summary": "Get question", "responses": {"200": {"description": "OK"}}}},
             "/exams": {
                 "get": {"tags": ["Examinations"], "summary": "List exams", "responses": {"200": {"description": "OK"}}},
                 "post": {"tags": ["Examinations"], "summary": "Create exam", "responses": {"201": {"description": "Created"}}},
@@ -95,6 +94,7 @@ def _build_openapi(settings: Settings) -> dict:
             "/exams/{exam_id}/start": {"post": {"tags": ["Attempts"], "summary": "Start attempt", "responses": {"201": {"description": "Attempt"}}}},
             "/attempts/{attempt_id}/answers": {"post": {"tags": ["Attempts"], "summary": "Submit answer", "responses": {"200": {"description": "OK"}}}},
             "/attempts/{attempt_id}/submit": {"post": {"tags": ["Attempts"], "summary": "Submit attempt", "responses": {"200": {"description": "Result"}}}},
+            "/attempts/{attempt_id}/answers/{question_id}": {"delete": {"tags": ["Attempts"], "summary": "Clear answer", "responses": {"204": {"description": "Deleted"}}}},
         },
     }
 
@@ -118,17 +118,30 @@ class CBT:
         create_tables: bool = True,
     ):
         self.settings = settings or get_settings()
+        self.settings.validate()
+        if create_tables and not self.settings.database_auto_create:
+            from sqlalchemy import inspect
+            from ecbtkit.db.base import get_engine
+            if not inspect(get_engine()).get_table_names():
+                raise RuntimeError("Database tables are missing. Run `ecbt migrate` or use `ecbt dev` for local development.")
         if title:
             self.settings.app_name = title
 
         init_db(self.settings.database_url, self.settings.database_echo)
-        if create_tables and self.settings.resolved_backend == "sql":
+        if create_tables and self.settings.database_auto_create:
             create_all_tables()
 
         api_routes = list(auth_routes) + list(core_routes)
 
+        async def exception_handler(request, exc):
+            from ecbtkit.core.exceptions import ECBTError
+            from ecbtkit.http.responses import error_response, internal_error_response
+            if isinstance(exc, ECBTError):
+                return error_response(exc)
+            return internal_error_response(self.settings.debug, str(exc))
+
         async def openapi_endpoint(request):
-            return APIResponse(_build_openapi(self.settings))
+            return APIResponse(self.openapi_schema)
 
         async def docs_endpoint(request):
             html = DOCS_HTML.format(
@@ -146,6 +159,7 @@ class CBT:
         ]
 
         middleware = [
+            Middleware(SecurityHeadersMiddleware),
             Middleware(
                 CORSMiddleware,
                 allow_origins=self.settings.cors_origins,
@@ -155,8 +169,12 @@ class CBT:
             ),
         ]
 
-        self._app = Starlette(routes=routes, middleware=middleware)
+        self._app = Starlette(routes=routes, middleware=middleware, exception_handlers={Exception: exception_handler})
         self._exams: Dict[str, Any] = {}
+
+    @property
+    def openapi_schema(self) -> dict:
+        return _build_openapi(self.settings)
 
     @property
     def app(self):

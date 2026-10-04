@@ -11,9 +11,10 @@ Supports rules such as:
 from __future__ import annotations
 
 import random
+import re
 from typing import Any, Dict, List, Optional, Sequence
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from ecbtkit.core.exceptions import InsufficientQuestionsError
@@ -50,14 +51,21 @@ class QuestionSelector:
 
         Raises InsufficientQuestionsError if the pool cannot satisfy the request.
         """
+        if type(total) is not int or total < 1:
+            raise ValueError("total must be a positive integer")
         exclude_ids = set(exclude_ids or [])
 
+        if (topics is not None and not isinstance(topics, dict)) or (difficulty is not None and not isinstance(difficulty, dict)):
+            raise ValueError("topic and difficulty quotas must be objects")
+        if topics and difficulty:
+            raise ValueError("Combining topic and difficulty quotas is not supported; use one quota type")
         if topics:
             return self._select_by_topics(
                 total=total,
                 subject=subject,
                 subject_id=subject_id,
                 topics=topics,
+                tags=tags,
                 exclude_ids=exclude_ids,
             )
 
@@ -67,6 +75,7 @@ class QuestionSelector:
                 subject=subject,
                 subject_id=subject_id,
                 difficulty=difficulty,
+                tags=tags,
                 exclude_ids=exclude_ids,
             )
 
@@ -113,10 +122,12 @@ class QuestionSelector:
         if difficulty is not None:
             q = q.where(Question.difficulty == difficulty)
 
-        if tags:
-            # Simple tag matching (comma-separated storage)
+        if tags and self.db.bind and self.db.bind.dialect.name in {"sqlite", "postgresql", "mysql", "mariadb"}:
             for tag in tags:
-                q = q.where(Question.tags.ilike(f"%{tag}%"))
+                escaped = re.escape(tag.strip())
+                if not escaped:
+                    continue
+                q = q.where(Question.tags.regexp_match(rf"(^|,)\s*{escaped}\s*(,|$)", flags="i"))
 
         if exclude_ids:
             q = q.where(Question.id.notin_(exclude_ids))
@@ -154,8 +165,10 @@ class QuestionSelector:
         subject: Optional[str],
         subject_id: Optional[int],
         topics: Dict[str, int],
+        tags: Optional[List[str]],
         exclude_ids: set,
     ) -> List[Question]:
+        self._validate_quotas(total, topics)
         selected: List[Question] = []
         remaining_exclude = set(exclude_ids)
 
@@ -175,6 +188,7 @@ class QuestionSelector:
                 subject=subject,
                 subject_id=subject_id or topic.subject_id,
                 topic_id=topic.id,
+                tags=tags,
                 exclude_ids=remaining_exclude,
             )
             batch = self._fetch_and_sample(q, quota)
@@ -188,14 +202,16 @@ class QuestionSelector:
             q = self._base_query(
                 subject=subject,
                 subject_id=subject_id,
+                tags=tags,
                 exclude_ids=remaining_exclude,
             )
-            selected.extend(self._fetch_and_sample(q, extra))
+            extras = self.db.execute(q).scalars().all()
+            if len(extras) < extra:
+                raise InsufficientQuestionsError(total, len(selected) + len(extras), {"topics": topics})
+            selected.extend(self.rng.sample(extras, extra))
 
-        # If total < allocated we already selected exactly the quotas;
-        # caller should normally set total == sum(quotas).
-        if len(selected) > total:
-            selected = self.rng.sample(selected, total)
+        if len(selected) < total:
+            raise InsufficientQuestionsError(total, len(selected), {"topics": topics})
 
         return selected
 
@@ -205,8 +221,10 @@ class QuestionSelector:
         subject: Optional[str],
         subject_id: Optional[int],
         difficulty: Dict[str, int],
+        tags: Optional[List[str]],
         exclude_ids: set,
     ) -> List[Question]:
+        self._validate_quotas(total, difficulty)
         selected: List[Question] = []
         remaining_exclude = set(exclude_ids)
 
@@ -225,6 +243,7 @@ class QuestionSelector:
                 subject=subject,
                 subject_id=subject_id,
                 difficulty=diff_enum,
+                tags=tags,
                 exclude_ids=remaining_exclude,
             )
             batch = self._fetch_and_sample(q, quota)
@@ -237,11 +256,23 @@ class QuestionSelector:
             q = self._base_query(
                 subject=subject,
                 subject_id=subject_id,
+                tags=tags,
                 exclude_ids=remaining_exclude,
             )
-            selected.extend(self._fetch_and_sample(q, extra))
+            extras = self.db.execute(q).scalars().all()
+            if len(extras) < extra:
+                raise InsufficientQuestionsError(total, len(selected) + len(extras), {"difficulty": difficulty})
+            selected.extend(self.rng.sample(extras, extra))
 
-        if len(selected) > total:
-            selected = self.rng.sample(selected, total)
+        if len(selected) < total:
+            raise InsufficientQuestionsError(total, len(selected), {"difficulty": difficulty})
 
         return selected
+
+    @staticmethod
+    def _validate_quotas(total: int, quotas: Dict[str, int]) -> None:
+        if total < 1 or any(type(value) is not int or value < 0 for value in quotas.values()):
+            raise ValueError("total and question quotas must be positive integers")
+        allocated = sum(quotas.values())
+        if allocated > total:
+            raise ValueError("question quotas cannot exceed total")

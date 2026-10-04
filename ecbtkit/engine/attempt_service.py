@@ -13,6 +13,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy.exc import IntegrityError as SQLIntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from ecbtkit.core.exceptions import (
@@ -25,6 +26,7 @@ from ecbtkit.core.exceptions import (
     ExamNotFoundError,
     ExamNotPublishedError,
     InvalidAttemptStateError,
+    InvalidSelectionRulesError,
     QuestionNotInAttemptError,
 )
 from ecbtkit.engine.marking import MarkingEngine
@@ -71,6 +73,26 @@ class AttemptService:
         if not exam.is_available():
             raise ExamNotAvailableError()
 
+        # Lock the exam row on databases that support row-level locking.
+        # The unique partial index below remains the final concurrency guard.
+        if self.db.bind and self.db.bind.dialect.name != "sqlite":
+            self.db.query(Exam).filter(Exam.id == exam_id).with_for_update().one()
+
+        active = (
+            self.db.query(Attempt)
+            .filter(
+                Attempt.exam_id == exam_id,
+                Attempt.candidate_id == candidate_id,
+                Attempt.status == AttemptStatus.ACTIVE,
+            )
+            .first()
+        )
+        if active:
+            if active.is_expired():
+                self._expire_attempt(active)
+            else:
+                return active
+
         # Attempt limit
         if exam.attempt_limit > 0:
             existing_count = (
@@ -87,33 +109,19 @@ class AttemptService:
             if existing_count >= exam.attempt_limit:
                 raise AttemptLimitExceededError()
 
-        # Prevent concurrent active attempt for same exam+candidate
-        active = (
-            self.db.query(Attempt)
-            .filter(
-                Attempt.exam_id == exam_id,
-                Attempt.candidate_id == candidate_id,
-                Attempt.status == AttemptStatus.ACTIVE,
-            )
-            .first()
-        )
-        if active:
-            # If already expired, finalize it first
-            if active.is_expired():
-                self._expire_attempt(active)
-            else:
-                return active  # idempotent: return existing active attempt
-
         # Selection
         rules = exam.selection_rules or {}
         selector = QuestionSelector(self.db, seed=force_seed)
-        questions = selector.select(
-            total=exam.question_count,
-            subject=exam.subject or rules.get("subject"),
-            topics=rules.get("topics"),
-            difficulty=rules.get("difficulty"),
-            tags=rules.get("tags"),
-        )
+        try:
+            questions = selector.select(
+                total=exam.question_count,
+                subject=exam.subject or rules.get("subject"),
+                topics=rules.get("topics"),
+                difficulty=rules.get("difficulty"),
+                tags=rules.get("tags"),
+            )
+        except ValueError as exc:
+            raise InvalidSelectionRulesError(str(exc)) from exc
 
         # Create attempt first to get an ID for the seed
         now = datetime.utcnow()
@@ -125,7 +133,22 @@ class AttemptService:
             expires_at=now + timedelta(minutes=exam.duration_minutes),
         )
         self.db.add(attempt)
-        self.db.flush()  # obtain attempt.id
+        try:
+            self.db.flush()  # obtain attempt.id
+        except SQLIntegrityError:
+            self.db.rollback()
+            existing = (
+                self.db.query(Attempt)
+                .filter(
+                    Attempt.exam_id == exam_id,
+                    Attempt.candidate_id == candidate_id,
+                    Attempt.status == AttemptStatus.ACTIVE,
+                )
+                .first()
+            )
+            if existing:
+                return existing
+            raise
 
         seed = force_seed or make_seed(exam_id, candidate_id, attempt.id)
         payload = build_assigned_payload(
@@ -139,7 +162,25 @@ class AttemptService:
         attempt.randomization_seed = seed
         attempt.status = AttemptStatus.ACTIVE
 
-        self.db.commit()
+        try:
+            self.db.commit()
+        except SQLIntegrityError:
+            self.db.rollback()
+            existing = (
+                self.db.query(Attempt)
+                .filter(
+                    Attempt.exam_id == exam_id,
+                    Attempt.candidate_id == candidate_id,
+                    Attempt.status == AttemptStatus.ACTIVE,
+                )
+                .first()
+            )
+            if existing:
+                return existing
+            raise
+        except Exception:
+            self.db.rollback()
+            raise
         self.db.refresh(attempt)
         return attempt
 
@@ -165,11 +206,16 @@ class AttemptService:
         assigned_ids = {item["question_id"] for item in attempt.assigned_questions}
         if question_id not in assigned_ids:
             raise QuestionNotInAttemptError(question_id)
+        question = self.db.get(Question, question_id)
+        valid_option_ids = {option.id for option in question.options} if question else set()
+        if len(selected_option_ids) != len(set(selected_option_ids)) or not set(selected_option_ids).issubset(valid_option_ids):
+            raise QuestionNotInAttemptError(question_id)
 
         # Upsert answer
         answer = (
             self.db.query(Answer)
             .filter(Answer.attempt_id == attempt_id, Answer.question_id == question_id)
+            .with_for_update()
             .first()
         )
         if answer is None:
@@ -179,7 +225,22 @@ class AttemptService:
         answer.selected_ids = selected_option_ids
         answer.answered_at = datetime.utcnow()
 
-        self.db.commit()
+        try:
+            self.db.commit()
+        except SQLIntegrityError:
+            self.db.rollback()
+            answer = (
+                self.db.query(Answer)
+                .filter(Answer.attempt_id == attempt_id, Answer.question_id == question_id)
+                .with_for_update()
+                .one()
+            )
+            answer.selected_ids = selected_option_ids
+            answer.answered_at = datetime.utcnow()
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
         self.db.refresh(answer)
         return answer
 
@@ -198,6 +259,7 @@ class AttemptService:
         answer = (
             self.db.query(Answer)
             .filter(Answer.attempt_id == attempt_id, Answer.question_id == question_id)
+            .with_for_update()
             .first()
         )
         if answer:
@@ -246,6 +308,16 @@ class AttemptService:
                 expected=AttemptStatus.ACTIVE.value,
             )
 
+        if attempt.status in (AttemptStatus.ACTIVE, AttemptStatus.EXPIRED):
+            result = (
+                self.db.query(Result)
+                .filter(Result.attempt_id == attempt.id)
+                .with_for_update()
+                .first()
+            )
+            if result:
+                return result
+
         # Check expiry
         if attempt.is_expired() and attempt.status == AttemptStatus.ACTIVE:
             attempt.status = AttemptStatus.EXPIRED
@@ -288,7 +360,14 @@ class AttemptService:
         result.breakdown = marking["breakdown"]
         result.submitted_at = now
 
-        self.db.commit()
+        try:
+            self.db.commit()
+        except SQLIntegrityError:
+            self.db.rollback()
+            result = self.db.query(Result).filter(Result.attempt_id == attempt_id).first()
+            if result:
+                return result
+            raise
         self.db.refresh(result)
         return result
 

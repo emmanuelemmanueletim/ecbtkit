@@ -10,6 +10,7 @@ import base64
 import hashlib
 import hmac
 import json
+import secrets
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
@@ -52,6 +53,8 @@ def create_token(
         "exp": now + int(expires_delta.total_seconds()),
         "type": token_type,
     }
+    if token_type == "refresh" and "jti" not in payload:
+        payload["jti"] = secrets.token_urlsafe(24)
     header = _b64url_encode(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
     body = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode())
     signature = _sign(f"{header}.{body}", settings.secret_key)
@@ -88,6 +91,18 @@ def create_access_token(subject: str, role: str, extra: Optional[Dict[str, Any]]
     return create_token(claims, token_type="access")
 
 
+def create_token_pair_for_user(user) -> Dict[str, str]:
+    """Issue a pair bound to the user's token version and refresh JTI."""
+    if not user.refresh_token_jti:
+        user.refresh_token_jti = secrets.token_urlsafe(24)
+    claims = {"sub": str(user.id), "role": user.role.value, "ver": user.token_version}
+    access_token = create_access_token(str(user.id), user.role.value, extra={"ver": user.token_version})
+    refresh_token = create_token(
+        {**claims, "jti": user.refresh_token_jti}, token_type="refresh"
+    )
+    return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
+
+
 def create_refresh_token(subject: str, role: str, jti: Optional[str] = None) -> str:
     claims: Dict[str, Any] = {"sub": str(subject), "role": role}
     if jti:
@@ -96,8 +111,9 @@ def create_refresh_token(subject: str, role: str, jti: Optional[str] = None) -> 
 
 
 def create_token_pair(subject: str, role: str, jti: Optional[str] = None) -> Dict[str, str]:
+    access_extra = {"jti": jti} if jti else None
     return {
-        "access_token": create_access_token(subject, role),
+        "access_token": create_access_token(subject, role, extra=access_extra),
         "refresh_token": create_refresh_token(subject, role, jti=jti),
         "token_type": "bearer",
     }

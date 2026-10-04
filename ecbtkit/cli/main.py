@@ -53,6 +53,8 @@ if __name__ == "__main__":
 @app.command()
 def dev(host: str = "127.0.0.1", port: int = 8000):
     from ecbtkit import CBT
+    from ecbtkit.core.config import get_settings
+    get_settings().database_auto_create = True
     console.print(f"[green]Starting[/] http://{host}:{port}/docs")
     CBT().run(host=host, port=port)
 
@@ -88,10 +90,11 @@ def create_admin(
 
 @app.command()
 def migrate():
+    """Create tables and apply bundled additive database upgrades."""
     from ecbtkit.db.base import create_all_tables, init_db
     init_db()
     create_all_tables()
-    console.print("[green]Tables created[/]")
+    console.print("[green]Database schema initialized and bundled upgrades applied[/]")
 
 
 if __name__ == "__main__":

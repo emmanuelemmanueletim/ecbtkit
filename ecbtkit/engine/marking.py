@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from ecbtkit.models.attempt import Answer, Attempt
 from ecbtkit.models.question import Question, QuestionType
-from ecbtkit.engine.scoring import ScoringEngine, ScoringRule, GradingEngine
+from ecbtkit.engine.scoring import GradingEngine
 
 
 class MarkingEngine:
@@ -28,12 +28,6 @@ class MarkingEngine:
         Returns a dict suitable for creating a Result record.
         """
         exam = attempt.exam
-        rule = ScoringRule(
-            marks_correct=exam.marks_correct,
-            marks_wrong=exam.marks_wrong,
-            marks_unanswered=exam.marks_unanswered,
-        )
-        scorer = ScoringEngine(rule)
 
         # Load assigned question IDs
         assigned = attempt.assigned_questions
@@ -55,6 +49,7 @@ class MarkingEngine:
 
         evaluations: List[Optional[bool]] = []
         breakdown = []
+        score = max_score = 0.0
 
         for item in assigned:
             qid = item["question_id"]
@@ -67,11 +62,21 @@ class MarkingEngine:
             selected = answer.selected_ids if answer else []
 
             is_correct = self._evaluate(question, selected)
+            correct_marks = question.marks
+            wrong_marks = exam.marks_wrong
+            unanswered_marks = exam.marks_unanswered
+            answer_marks = (
+                correct_marks if is_correct is True
+                else wrong_marks if is_correct is False
+                else unanswered_marks
+            )
+            score += answer_marks
+            max_score += correct_marks
 
             # Persist marking info on the answer row
             if answer:
                 answer.is_correct = is_correct
-                answer.marks_awarded = scorer.score_answer(is_correct)
+                answer.marks_awarded = answer_marks
             elif selected:  # shouldn't normally happen
                 pass
 
@@ -80,10 +85,20 @@ class MarkingEngine:
                 "question_id": qid,
                 "selected": selected,
                 "is_correct": is_correct,
-                "marks": scorer.score_answer(is_correct),
+                "marks": answer_marks,
             })
 
-        totals = scorer.calculate_total(evaluations)
+        counts = {True: 0, False: 0, None: 0}
+        for evaluation in evaluations:
+            counts[evaluation] += 1
+        totals = {
+            "score": round(score, 4),
+            "max_score": round(max_score, 4),
+            "percentage": round(score / max_score * 100.0, 2) if max_score else 0.0,
+            "correct_count": counts[True],
+            "incorrect_count": counts[False],
+            "unanswered_count": counts[None],
+        }
 
         # Grading
         grader = GradingEngine(exam.grading_scale or None)

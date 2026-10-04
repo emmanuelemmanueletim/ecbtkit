@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any, Dict, Optional
 
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from ecbtkit.core.exceptions import ECBTError
 from ecbtkit.security.headers import security_headers
@@ -23,6 +23,21 @@ class APIResponse(JSONResponse):
         if headers:
             hdrs.update(headers)
         super().__init__(content=content, status_code=status_code, headers=hdrs, **kwargs)
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        headers = security_headers()
+        if response.headers.get("content-type", "").startswith("text/html"):
+            headers["Content-Security-Policy"] = (
+                "default-src 'self'; frame-ancestors 'none'; "
+                "style-src 'self' https://cdn.jsdelivr.net; "
+                "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'"
+            )
+        for name, value in headers.items():
+            response.headers.setdefault(name, value)
+        return response
 
 
 def error_response(exc: ECBTError) -> JSONResponse:

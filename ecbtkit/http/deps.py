@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 from typing import Optional
 
 from starlette.requests import Request
@@ -14,9 +15,8 @@ from ecbtkit.security.tokens import decode_token
 
 
 def get_client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    # Forwarded headers are attacker-controlled unless a trusted proxy has
+    # already normalized them. Use the transport peer address by default.
     if request.client:
         return request.client.host
     return "unknown"
@@ -47,6 +47,11 @@ def get_current_user(request: Request, db: Session) -> User:
     user = db.get(User, int(user_id))
     if not user or not user.is_active:
         raise AuthenticationError("User not found or inactive")
+    token_jti = payload.get("jti")
+    if token_jti and (not user.refresh_token_jti or not secrets.compare_digest(token_jti, user.refresh_token_jti)):
+        raise AuthenticationError("Token has been revoked")
+    if "ver" in payload and int(payload["ver"]) != user.token_version:
+        raise AuthenticationError("Token has been revoked")
     return user
 
 

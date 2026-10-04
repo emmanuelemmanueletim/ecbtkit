@@ -1,8 +1,6 @@
-"""
-In-memory sliding-window rate limiter.
+"""Bounded process-local sliding-window rate limiter.
 
-For multi-process / multi-host production, swap the store for Redis
-(install ecbtkit[redis] and set ECBT_REDIS_URL).
+For multi-worker deployments, use a shared ingress or external rate-limit service.
 """
 
 from __future__ import annotations
@@ -10,7 +8,7 @@ from __future__ import annotations
 import time
 from collections import defaultdict, deque
 from threading import Lock
-from typing import Deque, Dict, Optional, Tuple
+from typing import Deque, Dict, Optional
 
 from ecbtkit.core.config import get_settings
 from ecbtkit.core.exceptions import RateLimitError
@@ -35,9 +33,20 @@ class RateLimiter:
         window = window if window is not None else settings.rate_limit_window_seconds
         now = time.monotonic()
         with self._lock:
+            if len(self._hits) >= 100_000 and key not in self._hits:
+                for stale_key in [k for k, hits in self._hits.items() if not hits or hits[-1] <= now - window]:
+                    self._hits.pop(stale_key, None)
+                    if len(self._hits) < 100_000:
+                        break
+                if len(self._hits) >= 100_000:
+                    self._hits.pop(next(iter(self._hits)))
             q = self._hits[key]
             while q and q[0] <= now - window:
                 q.popleft()
+            if not q:
+                self._hits.pop(key, None)
+                q = self._hits[key]
+            # Bound memory usage when many one-off client keys hit the API.
             if len(q) >= limit:
                 retry = int(window - (now - q[0])) + 1
                 raise RateLimitError(retry_after=max(1, retry))

@@ -32,3 +32,11 @@ pip install ecbtkit[dev]        # development tools
 ```bash
 ecbt version
 ```
+
+Initialize or upgrade the database before normal startup:
+
+```bash
+ecbt migrate
+```
+
+The app does not auto-create or alter tables at startup. `ecbt dev` enables automatic table creation for local development only.

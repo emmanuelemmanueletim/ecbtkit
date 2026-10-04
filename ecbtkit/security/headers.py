@@ -22,7 +22,7 @@ def security_headers() -> Dict[str, str]:
         "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
         "Cache-Control": "no-store",
     }
-    if settings.is_production:
+    if settings.is_production and settings.security_headers_enabled:
         headers["Strict-Transport-Security"] = (
             f"max-age={settings.hsts_max_age}; includeSubDomains; preload"
         )
