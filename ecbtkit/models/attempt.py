@@ -110,14 +110,14 @@ class Attempt(Base):
             return self.status == AttemptStatus.EXPIRED
         if not self.expires_at:
             return False
-        now = at or datetime.utcnow()
+        now = at or datetime.now(timezone.utc)
         expires = self.expires_at.replace(tzinfo=None) if self.expires_at.tzinfo else self.expires_at
         return now >= expires
 
     def remaining_seconds(self, at: Optional[datetime] = None) -> Optional[int]:
         if not self.expires_at or self.status != AttemptStatus.ACTIVE:
             return None
-        now = at or datetime.utcnow()
+        now = at or datetime.now(timezone.utc)
         expires = self.expires_at.replace(tzinfo=None) if self.expires_at.tzinfo else self.expires_at
         delta = (expires - now).total_seconds()
         return max(0, int(delta))

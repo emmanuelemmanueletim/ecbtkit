@@ -100,15 +100,17 @@ def create_admin(
 def migrate():
     """Apply Alembic migrations (alembic upgrade head)."""
     try:
+        import alembic  # noqa: F401
+    except ImportError:
+        console.print(
+            "[red]Alembic is required for migrations.[/]\n"
+            "Install: [cyan]pip install alembic[/] or [cyan]pip install ecbtkit[alembic][/]"
+        )
+        raise typer.Exit(1)
+    try:
         from ecbtkit.db.base import run_alembic_upgrade
         run_alembic_upgrade("head")
         console.print("[green]Migrations applied (alembic upgrade head)[/]")
-    except ImportError:
-        console.print("[yellow]alembic not installed — falling back to create_all for development[/]")
-        from ecbtkit.db.base import create_all_tables, init_db
-        init_db()
-        create_all_tables()
-        console.print("[green]Tables created via create_all (install alembic for production)[/]")
     except Exception as exc:
         console.print(f"[red]Migration failed:[/] {exc}")
         raise typer.Exit(1)

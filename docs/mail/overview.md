@@ -102,3 +102,14 @@ Configure for your sending domain:
 | Resend | `resend` | API key |
 | Gmail | `gmail` | app password or OAuth SMTP |
 | Microsoft 365 | `office365` | SMTP / OAuth |
+
+
+## Delivery durability
+
+Default async sending uses a **process-local thread pool**. If the worker process restarts before SMTP completes, a queued message may be lost.
+
+For production systems that must not lose mail:
+
+1. Set `ECBT_MAIL_ASYNC=false` for synchronous send (signup waits on SMTP), or
+2. Provide a custom `EmailProvider` that enqueues to Redis/SQS/Celery/your outbox, or
+3. Handle delivery in the application layer after framework token creation.

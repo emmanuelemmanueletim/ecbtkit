@@ -24,7 +24,7 @@ pip install -e .
 pip install -r requirements.txt
 ```
 
-The project is Alpha. Run `ecbt migrate` before starting the application; tables are not created automatically. `ecbt dev` enables development-only automatic table creation.
+The project is Beta. Run `ecbt migrate` before starting the application; tables are not created automatically. `ecbt dev` enables development-only automatic table creation.
 
 Optional drivers:
 
@@ -83,7 +83,7 @@ ECBT_DATABASE_URL=mysql://user:pass@localhost:3306/ecbt
 
 The examination engine currently supports SQL databases only. MongoDB is not a supported application backend. Set `ECBT_CORS_ORIGINS` to a comma-separated allowlist when browser clients need cross-origin access; credentials are disabled by default.
 
-**Maturity:** Alpha. Run multiple workers only with PostgreSQL/MySQL and a shared rate limiter at the proxy or gateway. Password reset creates a one-time token, but applications must deliver it through their email system; this package does not send email.
+**Maturity:** Beta. Run multiple workers only with PostgreSQL/MySQL and a shared rate limiter at the proxy or gateway. Password reset and verification emails are sent when `ECBT_MAIL_ENABLED=true` and a provider is configured. Async mail uses an in-process thread pool (queued messages can be lost on process restart); applications that need durable delivery should integrate an outbox or external queue.
 
 ## Examination engine
 

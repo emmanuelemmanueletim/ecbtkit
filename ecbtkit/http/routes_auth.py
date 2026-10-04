@@ -167,7 +167,7 @@ async def logout(request: Request):
     db = open_db()
     try:
         user = get_current_user(request, db)
-        AuthService(db).logout_all(user)
+        AuthService(db).logout(user)
         return APIResponse({"message": "Sessions revoked"})
     except ECBTError as exc:
         return error_response(exc)

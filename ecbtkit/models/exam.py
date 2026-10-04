@@ -108,7 +108,7 @@ class Exam(Base):
     def is_available(self, at: Optional[datetime] = None) -> bool:
         if self.status != ExamStatus.PUBLISHED:
             return False
-        now = at or datetime.utcnow()
+        now = at or datetime.now(timezone.utc)
         if self.available_from and now < self.available_from.replace(tzinfo=None):
             return False
         if self.available_until and now > self.available_until.replace(tzinfo=None):

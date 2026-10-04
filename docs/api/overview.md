@@ -52,4 +52,4 @@ Base path: `/api/v1`
 | GET | /health | Service health |
 | GET | /health/database | Database connectivity |
 
-Interactive documentation is available at `/docs` (Swagger UI) and `/redoc`.
+Interactive documentation is available at `/docs` (Swagger UI).

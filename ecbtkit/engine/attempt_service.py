@@ -10,7 +10,7 @@ Handles:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.exc import IntegrityError as SQLIntegrityError
@@ -124,7 +124,7 @@ class AttemptService:
             raise InvalidSelectionRulesError(str(exc)) from exc
 
         # Create attempt first to get an ID for the seed
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         attempt = Attempt(
             exam_id=exam_id,
             candidate_id=candidate_id,
@@ -223,7 +223,7 @@ class AttemptService:
             self.db.add(answer)
 
         answer.selected_ids = selected_option_ids
-        answer.answered_at = datetime.utcnow()
+        answer.answered_at = datetime.now(timezone.utc)
 
         try:
             self.db.commit()
@@ -236,7 +236,7 @@ class AttemptService:
                 .one()
             )
             answer.selected_ids = selected_option_ids
-            answer.answered_at = datetime.utcnow()
+            answer.answered_at = datetime.now(timezone.utc)
             self.db.commit()
         except Exception:
             self.db.rollback()
@@ -323,7 +323,7 @@ class AttemptService:
             attempt.status = AttemptStatus.EXPIRED
             auto_expired = True
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         attempt.submitted_at = now
         attempt.status = AttemptStatus.SUBMITTED if not auto_expired else AttemptStatus.EXPIRED
 

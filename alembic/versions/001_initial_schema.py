@@ -229,7 +229,25 @@ def upgrade() -> None:
     )
 
 
+    # One active attempt per candidate per exam (partial unique index)
+    bind = op.get_bind()
+    if bind.dialect.name == "sqlite":
+        op.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_attempt_one_active_per_candidate_exam "
+            "ON attempts (exam_id, candidate_id) WHERE status = 'ACTIVE'"
+        )
+    elif bind.dialect.name == "postgresql":
+        op.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_attempt_one_active_per_candidate_exam "
+            "ON attempts (exam_id, candidate_id) WHERE status = 'ACTIVE'"
+        )
+    # MySQL 8+ functional/partial indexes are limited; enforce in application layer too
+
+
 def downgrade() -> None:
+    bind = op.get_bind()
+    if bind.dialect.name in ("sqlite", "postgresql"):
+        op.execute("DROP INDEX IF EXISTS uq_attempt_one_active_per_candidate_exam")
     op.drop_table("results")
     op.drop_table("answers")
     op.drop_table("attempts")
