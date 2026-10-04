@@ -1,0 +1,19 @@
+# Core (required)
+starlette>=0.37.0
+uvicorn[standard]>=0.27.0
+sqlalchemy>=2.0.36
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+python-multipart>=0.0.6
+httpx>=0.26.0
+typer>=0.9.0
+rich>=13.7.0
+python-dotenv>=1.0.0
+argon2-cffi>=23.1.0
+
+# Optional databases — install what you need
+# psycopg2-binary>=2.9.9      # PostgreSQL
+# pymysql>=1.1.0              # MySQL
+# cryptography>=41.0.0        # MySQL SSL / extras
+# pymongo>=4.6.0              # MongoDB
+# redis>=5.0.0                # rate-limit / token blacklist

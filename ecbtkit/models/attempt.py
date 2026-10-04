@@ -1,0 +1,156 @@
+"""
+Examination Attempt model and related answer storage.
+"""
+
+from __future__ import annotations
+
+import enum
+import json
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from ecbtkit.db.base import Base
+
+
+class AttemptStatus(str, enum.Enum):
+    CREATED = "created"
+    ACTIVE = "active"
+    SUBMITTED = "submitted"
+    EXPIRED = "expired"
+    CANCELLED = "cancelled"
+
+
+class Attempt(Base):
+    """
+    One candidate taking one examination.
+    Holds the assigned questions (version), timer, answers, and final score.
+    """
+
+    __tablename__ = "attempts"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    exam_id: Mapped[int] = mapped_column(
+        ForeignKey("exams.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    candidate_id: Mapped[int] = mapped_column(
+        ForeignKey("candidates.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    status: Mapped[AttemptStatus] = mapped_column(
+        Enum(AttemptStatus), default=AttemptStatus.CREATED, nullable=False, index=True
+    )
+
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    submitted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    assigned_questions_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    randomization_seed: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    max_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    percentage: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    grade: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    passed: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+
+    metadata_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    exam = relationship("Exam", back_populates="attempts")
+    candidate = relationship("Candidate", back_populates="attempts")
+    answers: Mapped[List["Answer"]] = relationship(
+        "Answer", back_populates="attempt", cascade="all, delete-orphan"
+    )
+    result = relationship("Result", back_populates="attempt", uselist=False)
+
+    def __repr__(self) -> str:
+        return f"<Attempt id={self.id} exam={self.exam_id} candidate={self.candidate_id} status={self.status}>"
+
+    @property
+    def assigned_questions(self) -> List[Dict[str, Any]]:
+        if not self.assigned_questions_json:
+            return []
+        return json.loads(self.assigned_questions_json)
+
+    @assigned_questions.setter
+    def assigned_questions(self, value: List[Dict[str, Any]]) -> None:
+        self.assigned_questions_json = json.dumps(value) if value else None
+
+    def is_expired(self, at: Optional[datetime] = None) -> bool:
+        if self.status in (AttemptStatus.SUBMITTED, AttemptStatus.EXPIRED, AttemptStatus.CANCELLED):
+            return self.status == AttemptStatus.EXPIRED
+        if not self.expires_at:
+            return False
+        now = at or datetime.utcnow()
+        expires = self.expires_at.replace(tzinfo=None) if self.expires_at.tzinfo else self.expires_at
+        return now >= expires
+
+    def remaining_seconds(self, at: Optional[datetime] = None) -> Optional[int]:
+        if not self.expires_at or self.status != AttemptStatus.ACTIVE:
+            return None
+        now = at or datetime.utcnow()
+        expires = self.expires_at.replace(tzinfo=None) if self.expires_at.tzinfo else self.expires_at
+        delta = (expires - now).total_seconds()
+        return max(0, int(delta))
+
+
+class Answer(Base):
+    """A candidate's answer to a specific question within an attempt."""
+
+    __tablename__ = "answers"
+    __table_args__ = (
+        UniqueConstraint("attempt_id", "question_id", name="uq_answer_attempt_question"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    attempt_id: Mapped[int] = mapped_column(
+        ForeignKey("attempts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    question_id: Mapped[int] = mapped_column(
+        ForeignKey("questions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    selected_option_ids: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_correct: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    marks_awarded: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    answered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    attempt = relationship("Attempt", back_populates="answers")
+    question = relationship("Question")
+
+    def __repr__(self) -> str:
+        return f"<Answer id={self.id} attempt={self.attempt_id} question={self.question_id}>"
+
+    @property
+    def selected_ids(self) -> List[int]:
+        if not self.selected_option_ids:
+            return []
+        try:
+            data = json.loads(self.selected_option_ids)
+            if isinstance(data, list):
+                return [int(x) for x in data]
+            return [int(data)]
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return []
+
+    @selected_ids.setter
+    def selected_ids(self, value: List[int]) -> None:
+        self.selected_option_ids = json.dumps(value) if value else None
