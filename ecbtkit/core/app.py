@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Optional
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.routing import Mount, Route
 from starlette.responses import HTMLResponse
 
@@ -179,6 +181,15 @@ class CBT:
                 allow_headers=self.settings.cors_allow_headers,
             ),
         ]
+        if self.settings.trusted_hosts:
+            middleware.append(Middleware(
+                TrustedHostMiddleware, allowed_hosts=self.settings.trusted_hosts
+            ))
+        # HTTPS redirects rely on the ASGI scope scheme. When TLS terminates
+        # upstream, Uvicorn must be started with an explicit trusted proxy list
+        # so it can safely normalize X-Forwarded-Proto.
+        if self.settings.force_https:
+            middleware.append(Middleware(HTTPSRedirectMiddleware))
 
         self._app = Starlette(routes=routes, middleware=middleware, exception_handlers={Exception: exception_handler})
         self._exams: Dict[str, Any] = {}

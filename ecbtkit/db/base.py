@@ -40,13 +40,19 @@ def create_db_engine(database_url: Optional[str] = None, echo: Optional[bool] = 
     connect_args = {}
     if url.startswith("sqlite"):
         connect_args["check_same_thread"] = False
-    engine = create_engine(
-        url,
+    engine_options = dict(
         echo=echo,
         connect_args=connect_args,
         pool_pre_ping=True,
         pool_recycle=3600,
     )
+    if not url.startswith("sqlite"):
+        engine_options.update(
+            pool_size=settings.database_pool_size,
+            max_overflow=settings.database_max_overflow,
+            pool_timeout=settings.database_pool_timeout_seconds,
+        )
+    engine = create_engine(url, **engine_options)
     if url.startswith("sqlite"):
         @event.listens_for(engine, "connect")
         def _fk(dbapi_connection, connection_record):

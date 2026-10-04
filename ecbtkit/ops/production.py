@@ -33,21 +33,37 @@ def validate_production_settings(settings: Optional[Settings] = None) -> List[st
     if url.startswith("sqlite"):
         problems.append("SQLite is not supported in production — use PostgreSQL or MySQL")
 
+    if "*" in (s.cors_origins or []):
+        problems.append("Wildcard CORS origins are not allowed in production")
     if "*" in (s.cors_origins or []) and s.cors_allow_credentials:
         problems.append("Wildcard CORS with credentials is unsafe — set explicit origins")
 
     if s.rate_limit_enabled and not getattr(s, "redis_url", None):
         problems.append("ECBT_REDIS_URL is required in production when rate limiting is enabled")
 
-    if getattr(s, "mail_enabled", False):
+    if not s.mail_enabled:
+        problems.append("ECBT_MAIL_ENABLED must be true in production for account recovery")
+    if s.mail_enabled:
         if not s.mail_from:
             problems.append("ECBT_MAIL_FROM is required when email is enabled")
-        if (s.mail_provider or "null").lower() in ("null", "none", ""):
+        if (s.mail_provider or "null").lower() in ("null", "none", "", "off"):
             problems.append("ECBT_MAIL_PROVIDER must be set when email is enabled")
         base = getattr(s, "mail_link_base_url", "") or ""
         parsed = urlparse(base)
         if parsed.scheme != "https":
             problems.append("ECBT_MAIL_LINK_BASE_URL must use https in production")
+    if s.access_token_expire_minutes > 30:
+        problems.append("ECBT_ACCESS_TOKEN_EXPIRE_MINUTES must be 30 or less in production")
+    if s.database_echo:
+        problems.append("ECBT_DATABASE_ECHO must be false in production")
+    if s.database_pool_size < 1 or s.database_max_overflow < 0 or s.database_pool_timeout_seconds < 1:
+        problems.append("Database pool settings must use positive pool size/timeout and non-negative overflow")
+    if not s.trusted_hosts:
+        problems.append("ECBT_TRUSTED_HOSTS must list public hostnames in production")
+    if not s.force_https and not s.https_enforced_at_proxy:
+        problems.append("Enable ECBT_FORCE_HTTPS or attest HTTPS enforcement at the trusted proxy")
+    if s.trusted_proxy_hosts and not s.trusted_hosts:
+        problems.append("ECBT_TRUSTED_HOSTS must be set when configuring trusted proxies")
 
     if getattr(s, "database_auto_create", False):
         problems.append("ECBT_DATABASE_AUTO_CREATE must be false in production — use Alembic")

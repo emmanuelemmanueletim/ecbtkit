@@ -84,4 +84,4 @@ class SMTPEmailProvider(EmailProvider):
             return SendResult(ok=True, provider=self.name)
         except Exception as exc:
             logger.error("email.failed provider=smtp to=%s error=%s", _mask_email(message.to), type(exc).__name__)
-            return SendResult(ok=False, provider=self.name, error=str(exc))
+            return SendResult(ok=False, provider=self.name, error=type(exc).__name__)

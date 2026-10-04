@@ -17,6 +17,8 @@ from ecbtkit.db.base import get_session_factory
 from ecbtkit.models.user import User
 from ecbtkit.auth.service import AuthService, _hash_token
 from ecbtkit.security.passwords import generate_secure_token
+from ecbtkit.security.tokens import decode_token, _b64url_encode, _sign
+from ecbtkit.core.exceptions import TokenInvalidError
 
 
 def _make_settings(**kwargs) -> Settings:
@@ -201,28 +203,8 @@ class AuthVerificationTests(unittest.TestCase):
 
 
 class ProductionRateLimitConfigTests(unittest.TestCase):
-    def test_production_requires_redis_when_rate_limit_enabled(self):
-        from ecbtkit.ops.production import validate_production_settings
-
-        s = _make_settings(
-            environment="production",
-            debug=False,
-            secret_key="a" * 40,
-            database_url="postgresql://u:p@localhost/db",
-            rate_limit_enabled=True,
-            redis_url=None,
-            cors_origins=["https://app.example.com"],
-            cors_allow_credentials=True,
-            database_auto_create=False,
-            mail_enabled=False,
-        )
-        problems = validate_production_settings(s)
-        self.assertTrue(any("REDIS" in p for p in problems))
-
-    def test_production_accepts_redis_url(self):
-        from ecbtkit.ops.production import validate_production_settings
-
-        s = _make_settings(
+    def _safe_production_settings(self, **overrides):
+        values = dict(
             environment="production",
             debug=False,
             secret_key="a" * 40,
@@ -232,10 +214,88 @@ class ProductionRateLimitConfigTests(unittest.TestCase):
             cors_origins=["https://app.example.com"],
             cors_allow_credentials=True,
             database_auto_create=False,
-            mail_enabled=False,
+            mail_enabled=True,
+            mail_provider="smtp",
+            mail_from="noreply@example.com",
+            mail_host="smtp.example.com",
+            mail_link_base_url="https://app.example.com",
+            trusted_hosts=["api.example.com"],
+            force_https=True,
         )
+        values.update(overrides)
+        return _make_settings(**values)
+
+    def test_production_requires_redis_when_rate_limit_enabled(self):
+        from ecbtkit.ops.production import validate_production_settings
+
+        s = self._safe_production_settings(redis_url=None)
+        problems = validate_production_settings(s)
+        self.assertTrue(any("REDIS" in p for p in problems))
+
+    def test_production_accepts_redis_url(self):
+        from ecbtkit.ops.production import validate_production_settings
+
+        s = self._safe_production_settings()
         problems = validate_production_settings(s)
         self.assertFalse(any("REDIS" in p for p in problems))
+        self.assertEqual(problems, [])
+
+    def test_production_requires_host_and_https_settings(self):
+        from ecbtkit.ops.production import validate_production_settings
+
+        settings = self._safe_production_settings(trusted_hosts=[], force_https=False)
+        problems = validate_production_settings(settings)
+        self.assertTrue(any("TRUSTED_HOSTS" in item for item in problems))
+        self.assertTrue(any("FORCE_HTTPS" in item for item in problems))
+
+    def test_production_app_refuses_unsafe_configuration(self):
+        settings = self._safe_production_settings(force_https=False)
+        set_settings(settings)
+        get_settings.cache_clear()
+        set_settings(settings)
+        with self.assertRaisesRegex(RuntimeError, "Unsafe production config"):
+            CBT(settings, create_tables=False)
+
+
+class TokenValidationTests(unittest.TestCase):
+    def test_decode_rejects_token_without_expiry(self):
+        settings = _make_settings()
+        set_settings(settings)
+        get_settings.cache_clear()
+        set_settings(settings)
+        header = _b64url_encode(b'{"alg":"HS256","typ":"JWT"}')
+        body = _b64url_encode(b'{"sub":"1","type":"access"}')
+        signature = _sign(f"{header}.{body}", settings.secret_key)
+        with self.assertRaises(TokenInvalidError):
+            decode_token(f"{header}.{body}.{signature}")
+
+
+class RedisRateLimitAtomicityTests(unittest.TestCase):
+    def test_redis_backend_uses_script_and_rejects_at_limit(self):
+        from ecbtkit.security.rate_limit import _RedisBackend
+        from ecbtkit.core.exceptions import RateLimitError
+
+        class FakeRedis:
+            script = None
+
+            def eval(self, script, key_count, key, now, window, limit, member):
+                self.script = script
+                return [0, 7]
+
+        backend = object.__new__(_RedisBackend)
+        backend._r = FakeRedis()
+        with self.assertRaises(RateLimitError):
+            backend.check("auth:login", limit=1, window=60)
+        self.assertIn("redis.call('ZCARD'", backend._r.script)
+        self.assertIn("if count >= limit", backend._r.script)
+
+
+class ProxyTrustTests(unittest.TestCase):
+    def test_proxy_ip_must_match_trusted_network(self):
+        from ecbtkit.http.deps import _is_trusted_proxy
+
+        self.assertTrue(_is_trusted_proxy("10.1.2.3", ["10.0.0.0/8"]))
+        self.assertFalse(_is_trusted_proxy("192.0.2.8", ["10.0.0.0/8"]))
 
 
 if __name__ == "__main__":

@@ -49,17 +49,32 @@ class _RedisBackend:
         self._r.ping()
 
     def check(self, key: str, limit: int, window: int) -> None:
+        # Lua makes pruning, checking and recording one atomic operation. A
+        # pipeline alone allows concurrent requests to all pass the same count.
+        script = """
+        local key = KEYS[1]
+        local now = tonumber(ARGV[1])
+        local cutoff = now - tonumber(ARGV[2])
+        local limit = tonumber(ARGV[3])
+        local member = ARGV[4]
+        redis.call('ZREMRANGEBYSCORE', key, '-inf', cutoff)
+        local count = redis.call('ZCARD', key)
+        if count >= limit then
+            local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+            local retry = tonumber(ARGV[2])
+            if oldest[2] then retry = math.max(1, math.ceil(tonumber(oldest[2]) + tonumber(ARGV[2]) - now)) end
+            return {0, retry}
+        end
+        redis.call('ZADD', key, now, member)
+        redis.call('EXPIRE', key, tonumber(ARGV[2]) + 1)
+        return {1, 0}
+        """
         now = time.time()
-        member = f"{now}:{uuid.uuid4().hex}"
-        pipe = self._r.pipeline()
-        pipe.zremrangebyscore(key, 0, now - window)
-        pipe.zadd(key, {member: now})
-        pipe.zcard(key)
-        pipe.expire(key, window + 1)
-        results = pipe.execute()
-        count = int(results[2])
-        if count > limit:
-            raise RateLimitError(retry_after=window)
+        allowed, retry = self._r.eval(
+            script, 1, key, now, window, limit, f"{now}:{uuid.uuid4().hex}"
+        )
+        if int(allowed) != 1:
+            raise RateLimitError(retry_after=int(retry))
 
     def reset(self, key: str) -> None:
         self._r.delete(key)

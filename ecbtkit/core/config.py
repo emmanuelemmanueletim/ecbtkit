@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     #   mysql+pymysql://user:pass@localhost:3306/ecbt
     database_url: str = "sqlite:///./ecbtkit.db"
     database_echo: bool = False
+    database_pool_size: int = 10
+    database_max_overflow: int = 20
+    database_pool_timeout_seconds: int = 30
     database_backend: str = "auto"
     database_auto_create: bool = False
 
@@ -101,6 +104,8 @@ class Settings(BaseSettings):
     # ---- Production / ops --------------------------------------------
     trusted_hosts: List[str] = Field(default_factory=list)
     force_https: bool = False
+    https_enforced_at_proxy: bool = False
+    trusted_proxy_hosts: List[str] = Field(default_factory=list)
 
     # Security headers
     security_headers_enabled: bool = True

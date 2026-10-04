@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import ipaddress
 import secrets
 from typing import Optional
 
 from starlette.requests import Request
 from sqlalchemy.orm import Session
 
+from ecbtkit.core.config import get_settings
 from ecbtkit.core.exceptions import AuthenticationError, AuthorizationError
 from ecbtkit.db.base import get_session_factory
 from ecbtkit.models.user import User, UserRole
@@ -15,11 +17,32 @@ from ecbtkit.security.tokens import decode_token
 
 
 def get_client_ip(request: Request) -> str:
-    # Forwarded headers are attacker-controlled unless a trusted proxy has
-    # already normalized them. Use the transport peer address by default.
+    # Forwarded headers are attacker-controlled unless the direct peer is in
+    # the explicitly configured proxy allowlist.
+    settings = get_settings()
+    peer = request.client.host if request.client else ""
+    if peer and _is_trusted_proxy(peer, settings.trusted_proxy_hosts):
+        forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
+        if forwarded:
+            return forwarded
     if request.client:
         return request.client.host
     return "unknown"
+
+
+def _is_trusted_proxy(peer: str, configured: list[str]) -> bool:
+    try:
+        address = ipaddress.ip_address(peer)
+    except ValueError:
+        return False
+    for item in configured:
+        try:
+            if address in ipaddress.ip_network(item, strict=False):
+                return True
+        except ValueError:
+            if item.lower() == peer.lower():
+                return True
+    return False
 
 
 def open_db() -> Session:

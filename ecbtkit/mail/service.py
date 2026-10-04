@@ -11,6 +11,7 @@ import html
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from threading import BoundedSemaphore
 from typing import Optional
 
 from ecbtkit.core.config import Settings, get_settings
@@ -21,6 +22,7 @@ logger = logging.getLogger("ecbtkit.mail")
 
 # Small thread pool so signup/reset is not blocked by SMTP latency
 _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ecbt-mail")
+_email_slots = BoundedSemaphore(128)
 
 
 class EmailService:
@@ -109,9 +111,33 @@ class EmailService:
             from_name=self.settings.mail_from_name,
         )
         if self.settings.mail_async:
-            _executor.submit(self._safe_send, msg)
+            if not _email_slots.acquire(blocking=False):
+                logger.error("email.queue_full to=%s", _mask_email(to))
+                return SendResult(ok=False, provider=self.provider.name, error="Email queue is full")
+            try:
+                future = _executor.submit(self._send_and_release, msg)
+            except RuntimeError:
+                _email_slots.release()
+                logger.exception("email.queue_rejected to=%s", _mask_email(to))
+                return SendResult(ok=False, provider=self.provider.name, error="Email queue is unavailable")
+            future.add_done_callback(self._log_send_failure)
             return SendResult(ok=True, provider=self.provider.name, message_id="queued")
         return self._safe_send(msg)
+
+    def _send_and_release(self, msg: EmailMessage) -> SendResult:
+        try:
+            return self._safe_send(msg)
+        finally:
+            _email_slots.release()
+
+    @staticmethod
+    def _log_send_failure(future) -> None:
+        try:
+            result = future.result()
+            if not result.ok:
+                logger.error("email.delivery_failed provider=%s error=%s", result.provider, result.error)
+        except Exception as exc:
+            logger.error("email.delivery_failed error=%s", type(exc).__name__)
 
     def _safe_send(self, msg: EmailMessage) -> SendResult:
         try:
@@ -122,7 +148,11 @@ class EmailService:
                 _mask_email(msg.to),
                 type(exc).__name__,
             )
-            return SendResult(ok=False, provider=getattr(self.provider, "name", "?"), error=str(exc))
+            return SendResult(
+                ok=False,
+                provider=getattr(self.provider, "name", "?"),
+                error=type(exc).__name__,
+            )
 
     def _html_shell(self, title: str, body: str) -> str:
         app = self.settings.app_name

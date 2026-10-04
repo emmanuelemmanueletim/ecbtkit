@@ -72,8 +72,10 @@ def decode_token(token: str, *, expected_type: Optional[str] = None) -> Dict[str
         if not hmac.compare_digest(expected_sig, sig_b64):
             raise TokenInvalidError("Invalid token signature")
         payload = json.loads(_b64url_decode(body_b64))
-        exp = payload.get("exp", 0)
-        if int(exp) < int(time.time()):
+        exp = payload.get("exp")
+        if exp is None:
+            raise TokenInvalidError("Token expiry is required")
+        if int(exp) <= int(time.time()):
             raise TokenExpiredError()
         if expected_type and payload.get("type") != expected_type:
             raise TokenInvalidError(f"Expected {expected_type} token")
