@@ -7,6 +7,8 @@ Never logs tokens or full reset links.
 
 from __future__ import annotations
 
+import html
+
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
@@ -30,7 +32,7 @@ class EmailService:
 
     def send_verification(self, *, to: str, token: str, full_name: Optional[str] = None) -> SendResult:
         link = self._link("verify-email", token)
-        name = full_name or "there"
+        name = html.escape(full_name or "there")
         subject = f"Verify your {self.settings.app_name} account"
         text = (
             f"Hi {name},\n\n"
@@ -48,7 +50,7 @@ class EmailService:
 
     def send_password_reset(self, *, to: str, token: str, full_name: Optional[str] = None) -> SendResult:
         link = self._link("reset-password", token)
-        name = full_name or "there"
+        name = html.escape(full_name or "there")
         subject = f"Reset your {self.settings.app_name} password"
         text = (
             f"Hi {name},\n\n"
@@ -65,7 +67,7 @@ class EmailService:
         return self._dispatch(to, subject, text, html)
 
     def send_password_changed(self, *, to: str, full_name: Optional[str] = None) -> SendResult:
-        name = full_name or "there"
+        name = html.escape(full_name or "there")
         subject = f"Your {self.settings.app_name} password was changed"
         text = (
             f"Hi {name},\n\n"
@@ -80,7 +82,7 @@ class EmailService:
         return self._dispatch(to, subject, text, html)
 
     def send_new_signin(self, *, to: str, ip: Optional[str] = None, full_name: Optional[str] = None) -> SendResult:
-        name = full_name or "there"
+        name = html.escape(full_name or "there")
         where = f" from IP {ip}" if ip else ""
         subject = f"New sign-in to {self.settings.app_name}"
         text = f"Hi {name},\n\nThere was a new sign-in to your account{where}.\nIf this wasn't you, change your password.\n"

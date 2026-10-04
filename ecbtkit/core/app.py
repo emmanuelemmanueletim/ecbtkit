@@ -127,17 +127,20 @@ class CBT:
         if _problems and self.settings.is_production:
             raise RuntimeError('Unsafe production config: ' + '; '.join(_problems))
         self.settings.validate()
-        if create_tables and not self.settings.database_auto_create:
-            from sqlalchemy import inspect
-            from ecbtkit.db.base import get_engine
-            if not inspect(get_engine()).get_table_names():
-                raise RuntimeError("Database tables are missing. Run `ecbt migrate` or use `ecbt dev` for local development.")
         if title:
             self.settings.app_name = title
 
         init_db(self.settings.database_url, self.settings.database_echo)
         if create_tables and self.settings.database_auto_create:
             create_all_tables()
+        elif create_tables and not self.settings.database_auto_create:
+            from ecbtkit.db.base import tables_exist
+            if not tables_exist():
+                raise RuntimeError(
+                    "Database tables are missing. Run `ecbt migrate` "
+                    "or set ECBT_DATABASE_AUTO_CREATE=true for local development "
+                    "(or use `ecbt dev`)."
+                )
 
         api_routes = list(auth_routes) + list(core_routes)
 
@@ -196,6 +199,30 @@ class CBT:
         builder = ExamBuilder(name=name, **kwargs)
         self._exams[name] = builder.to_dict()
         return builder
+
+
+    def add_route(self, path: str, endpoint, methods: list | None = None, **kwargs):
+        """Mount a custom route on the API prefix."""
+        from starlette.routing import Route
+        methods = methods or ["GET"]
+        full = f"{self.settings.api_prefix.rstrip('/')}/{path.lstrip('/')}"
+        self._app.routes.insert(0, Route(full, endpoint, methods=methods, **kwargs))
+        return self
+
+    def add_middleware(self, middleware_cls, **kwargs):
+        """Add Starlette middleware."""
+        self._app.add_middleware(middleware_cls, **kwargs)
+        return self
+
+    def include_router(self, routes: list, prefix: str = ""):
+        """Include a list of Starlette Route objects under optional prefix."""
+        from starlette.routing import Mount
+        if prefix:
+            self._app.routes.insert(0, Mount(prefix, routes=routes))
+        else:
+            for r in routes:
+                self._app.routes.insert(0, r)
+        return self
 
     def run(self, host: Optional[str] = None, port: Optional[int] = None, **kwargs: Any) -> None:
         import uvicorn

@@ -47,7 +47,7 @@ async def health_db(request: Request):
         return _ok({"status": "ok", "database": "connected", "backend": "sql"})
     except Exception as exc:
         return APIResponse(
-            {"status": "error", "database": str(exc), "backend": "sql"},
+            {"status": "error", "database": "unavailable", "backend": "sql"},
             status_code=503,
         )
 

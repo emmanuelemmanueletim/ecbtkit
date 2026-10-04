@@ -28,7 +28,7 @@ def create(name: str = typer.Argument(...), path: Optional[Path] = typer.Option(
         raise typer.Exit(1)
     target.mkdir(parents=True)
     (target / "main.py").write_text(
-        f'''from ecbtkit import CBT
+        '''from ecbtkit import CBT
 
 app = CBT()
 
@@ -40,23 +40,26 @@ if __name__ == "__main__":
         f"ECBT_APP_NAME={name}\n"
         "ECBT_DEBUG=true\n"
         "ECBT_DATABASE_URL=sqlite:///./ecbtkit.db\n"
-        "ECBT_SECRET_KEY=change-me-to-a-long-random-string-please\n"
-        "ECBT_CORS_ORIGINS=*\n"
+        "ECBT_DATABASE_AUTO_CREATE=true\n"
+        "ECBT_SECRET_KEY=change-me-to-a-long-random-string-please-32chars\n"
+        "ECBT_CORS_ORIGINS=http://127.0.0.1:3000\n"
     )
-    (target / "requirements.txt").write_text("ecbtkit>=0.1.0\n")
     console.print(Panel.fit(
-        f"[green]Created[/] {target}\n\n  cd {name}\n  pip install -e /path/to/ecbtkit\n  python main.py",
+        f"[green]Created[/] {target}\n\n  cd {name}\n  pip install -e /path/to/ecbtkit\n  ecbt migrate\n  python main.py",
         title="eCBTKit",
     ))
 
 
 @app.command()
 def dev(host: str = "127.0.0.1", port: int = 8000):
-    from ecbtkit import CBT
+    """Start with auto-create tables (local development only)."""
+    import os
+    os.environ.setdefault("ECBT_DATABASE_AUTO_CREATE", "true")
     from ecbtkit.core.config import get_settings
-    get_settings().database_auto_create = True
+    get_settings.cache_clear()
+    from ecbtkit import CBT
     console.print(f"[green]Starting[/] http://{host}:{port}/docs")
-    CBT().run(host=host, port=port)
+    CBT(create_tables=True).run(host=host, port=port)
 
 
 @app.command("create-admin")
@@ -65,36 +68,64 @@ def create_admin(
     password: str = typer.Option(..., prompt=True, hide_input=True, confirmation_prompt=True),
     full_name: str = typer.Option("Administrator", prompt=True),
 ):
-    from ecbtkit.db.base import create_all_tables, init_db, session_scope
+    from ecbtkit.db.base import init_db, session_scope, tables_exist, create_all_tables
     from ecbtkit.models.user import User, UserRole
     from ecbtkit.security.passwords import hash_password, validate_password_strength
+    from ecbtkit.core.config import get_settings
 
     validate_password_strength(password)
     init_db()
-    create_all_tables()
+    if not tables_exist():
+        if get_settings().database_auto_create:
+            create_all_tables()
+        else:
+            console.print("[red]Database not migrated. Run: ecbt migrate[/]")
+            raise typer.Exit(1)
     with session_scope() as db:
         if db.query(User).filter(User.email == email.lower()).first():
             console.print("[red]Email already registered[/]")
             raise typer.Exit(1)
-        user = User(
+        db.add(User(
             email=email.lower(),
             hashed_password=hash_password(password),
             full_name=full_name,
             role=UserRole.ADMINISTRATOR,
             is_active=True,
             is_verified=True,
-        )
-        db.add(user)
+        ))
         console.print(f"[green]Administrator created:[/] {email}")
 
 
 @app.command()
 def migrate():
-    """Create tables and apply bundled additive database upgrades."""
-    from ecbtkit.db.base import create_all_tables, init_db
-    init_db()
-    create_all_tables()
-    console.print("[green]Database schema initialized and bundled upgrades applied[/]")
+    """Apply Alembic migrations (alembic upgrade head)."""
+    try:
+        from ecbtkit.db.base import run_alembic_upgrade
+        run_alembic_upgrade("head")
+        console.print("[green]Migrations applied (alembic upgrade head)[/]")
+    except ImportError:
+        console.print("[yellow]alembic not installed — falling back to create_all for development[/]")
+        from ecbtkit.db.base import create_all_tables, init_db
+        init_db()
+        create_all_tables()
+        console.print("[green]Tables created via create_all (install alembic for production)[/]")
+    except Exception as exc:
+        console.print(f"[red]Migration failed:[/] {exc}")
+        raise typer.Exit(1)
+
+
+@app.command("check-production")
+def check_production():
+    """Validate production settings."""
+    from ecbtkit.ops.production import validate_production_settings
+    from ecbtkit.core.config import get_settings
+    problems = validate_production_settings(get_settings())
+    if not problems:
+        console.print("[green]Production configuration looks safe[/]")
+    else:
+        for p in problems:
+            console.print(f"[red]• {p}[/]")
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":

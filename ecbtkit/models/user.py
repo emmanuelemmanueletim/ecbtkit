@@ -1,6 +1,4 @@
-"""
-User / Administrator / Examiner models.
-"""
+"""User model with separate verification and reset token fields."""
 
 from __future__ import annotations
 
@@ -21,11 +19,6 @@ class UserRole(str, enum.Enum):
 
 
 class User(Base):
-    """
-    Framework user with production auth fields:
-    lockout, verification, password-reset tokens.
-    """
-
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -38,15 +31,20 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    # Brute-force protection
     failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    # Password reset
-    reset_token: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    # Password reset — hash only, never store raw token
     reset_token_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, unique=True)
     reset_token_expires: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Email verification — separate from reset to avoid collisions
+    verification_token_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, unique=True)
+    verification_token_expires: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     refresh_token_jti: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 

@@ -2,20 +2,20 @@
 
 ## [0.1.0] — 2026-10-04
 
-### Added
-- CBT domain engine: questions, exams, attempts, timers, marking, scoring, grading
-- Starlette HTTP layer (FastAPI-independent)
-- Strong auth: Argon2id, lockout, access + refresh tokens, password policy
-- **Email delivery layer** — provider presets (SMTP, SES, SendGrid, Mailgun, Postmark, Resend, Gmail, Office365)
-- Verification & password-reset emails; tokens never returned in HTTP responses
-- Async mail so signup/reset is not blocked by SMTP
-- Redis-backed shared rate limiting with in-memory fallback
-- Alembic migration support
-- Production configuration validation
-- Multi-database: SQLite, PostgreSQL, MySQL, MongoDB adapter
-- Structured errors, security headers, OpenAPI docs
+### Framework maturity
+- Starlette-based CBT API framework (not a hosted product)
+- Alembic-first migrations (`ecbt migrate` → `alembic upgrade head`)
+- Startup never alters production schema
+- Email verification + password reset with hashed, single-use tokens
+- Verification tokens separated from reset tokens
+- No access tokens issued until verification succeeds (when required)
+- Redis required for rate limiting in production (no silent memory fallback)
+- Production config validation (secrets, CORS, SQLite, mail HTTPS links, Redis)
+- Extension points: custom routes, middleware, injectable engine, email providers
+- Candidate-only public signup; staff via `ecbt create-admin`
+- Refresh tokens single-use; sessions revoked on password change/reset/logout
 
 ### Author
 Emmanuel Emmanuel Etim  
-Email: emmanuel224etim089@gmail.com  
-Repository: https://github.com/emmanuelemmanueletim/ecbtkit
+emmanuel224etim089@gmail.com  
+https://github.com/emmanuelemmanueletim/ecbtkit

@@ -56,19 +56,22 @@ async def signup(request: Request):
             except Exception:
                 db.rollback()
                 raise
-            return APIResponse(
-                {
-                    **tokens,
-                    "user": {
-                        "id": user.id,
-                        "email": user.email,
-                        "full_name": user.full_name,
-                        "role": user.role.value,
-                        "is_verified": user.is_verified,
-                    },
+            payload = {
+                "user": {
+                    "id": user.id,
+                    "email": user.email,
+                    "full_name": user.full_name,
+                    "role": user.role.value,
+                    "is_verified": user.is_verified,
                 },
-                status_code=201,
-            )
+            }
+            if tokens:
+                payload.update(tokens)
+            else:
+                payload["message"] = (
+                    "Account created. Please verify your email before signing in."
+                )
+            return APIResponse(payload, status_code=201)
         finally:
             db.close()
     except ECBTError as exc:
@@ -197,6 +200,37 @@ async def forgot_password(request: Request):
         return internal_error_response(get_settings().debug, str(exc))
 
 
+
+async def verify_email(request: Request):
+    try:
+        body = await _read_json(request)
+        token = body.get("token")
+        if not token:
+            raise ValidationError("token is required")
+        db = open_db()
+        try:
+            user = AuthService(db).verify_email(token)
+            from ecbtkit.security.tokens import create_token_pair_for_user
+            tokens = create_token_pair_for_user(user)
+            return APIResponse({
+                **tokens,
+                "user": {
+                    "id": user.id,
+                    "email": user.email,
+                    "full_name": user.full_name,
+                    "role": user.role.value,
+                    "is_verified": user.is_verified,
+                },
+                "message": "Email verified successfully",
+            })
+        finally:
+            db.close()
+    except ECBTError as exc:
+        return error_response(exc)
+    except Exception as exc:
+        return internal_error_response(get_settings().debug, str(exc))
+
+
 async def reset_password(request: Request):
     try:
         body = await _read_json(request)
@@ -227,5 +261,6 @@ auth_routes = [
     Route("/auth/logout", logout, methods=["POST"]),
     Route("/auth/change-password", change_password, methods=["POST"]),
     Route("/auth/forgot-password", forgot_password, methods=["POST"]),
+    Route("/auth/verify-email", verify_email, methods=["POST"]),
     Route("/auth/reset-password", reset_password, methods=["POST"]),
 ]

@@ -1,14 +1,12 @@
 """
-Rate limiter with optional Redis backend (shared across workers).
-
-Falls back to in-process memory if Redis is unavailable — fail-safe, never
-blocks the app from starting.
+Rate limiter — in-memory for development; Redis required in multi-worker production.
 """
 
 from __future__ import annotations
 
 import logging
 import time
+import uuid
 from collections import defaultdict, deque
 from threading import Lock
 from typing import Deque, Dict, Optional
@@ -34,46 +32,46 @@ class _MemoryBackend:
                 retry = int(window - (now - q[0])) + 1
                 raise RateLimitError(retry_after=max(1, retry))
             q.append(now)
-            # light cleanup
-            if len(self._hits) > 50_000:
-                stale = [k for k, v in self._hits.items() if not v or v[-1] <= now - window]
-                for k in stale[:1000]:
-                    self._hits.pop(k, None)
 
     def reset(self, key: str) -> None:
         with self._lock:
             self._hits.pop(key, None)
 
+    def ping(self) -> bool:
+        return True
+
 
 class _RedisBackend:
     def __init__(self, url: str):
-        import redis  # optional dependency
+        import redis
 
-        self._r = redis.Redis.from_url(url, decode_responses=True, socket_connect_timeout=1.0)
+        self._r = redis.Redis.from_url(url, decode_responses=True, socket_connect_timeout=1.5)
         self._r.ping()
 
     def check(self, key: str, limit: int, window: int) -> None:
-        # Sliding window via sorted set
         now = time.time()
+        member = f"{now}:{uuid.uuid4().hex}"
         pipe = self._r.pipeline()
-        member = f"{now}"
         pipe.zremrangebyscore(key, 0, now - window)
         pipe.zadd(key, {member: now})
         pipe.zcard(key)
         pipe.expire(key, window + 1)
         results = pipe.execute()
-        count = results[2]
+        count = int(results[2])
         if count > limit:
             raise RateLimitError(retry_after=window)
 
     def reset(self, key: str) -> None:
         self._r.delete(key)
 
+    def ping(self) -> bool:
+        return bool(self._r.ping())
+
 
 class RateLimiter:
     def __init__(self) -> None:
         self._backend = None
-        self._memory = _MemoryBackend()
+        self._init_error: Optional[str] = None
 
     def _get_backend(self):
         if self._backend is not None:
@@ -86,8 +84,19 @@ class RateLimiter:
                 logger.info("rate_limit.backend=redis")
                 return self._backend
             except Exception as exc:
-                logger.warning("rate_limit.redis_unavailable fallback=memory error=%s", type(exc).__name__)
-        self._backend = self._memory
+                self._init_error = type(exc).__name__
+                logger.error("rate_limit.redis_unavailable error=%s", self._init_error)
+                if settings.is_production:
+                    raise RuntimeError(
+                        "Redis rate limiter required in production but unavailable: "
+                        f"{self._init_error}"
+                    ) from exc
+                logger.warning("rate_limit.fallback=memory (non-production)")
+        elif settings.is_production and settings.rate_limit_enabled:
+            raise RuntimeError(
+                "ECBT_REDIS_URL is required in production when rate limiting is enabled"
+            )
+        self._backend = _MemoryBackend()
         return self._backend
 
     def check(
@@ -102,13 +111,18 @@ class RateLimiter:
             return
         limit = limit if limit is not None else settings.rate_limit_requests
         window = window if window is not None else settings.rate_limit_window_seconds
+        backend = self._get_backend()
         try:
-            self._get_backend().check(key, limit, window)
+            backend.check(key, limit, window)
         except RateLimitError:
             raise
-        except Exception:
-            # Fail open if backend errors mid-request
-            logger.warning("rate_limit.check_failed fail_open=true")
+        except Exception as exc:
+            if settings.is_production:
+                raise RateLimitError(
+                    message="Rate limiter unavailable",
+                    retry_after=60,
+                ) from exc
+            logger.warning("rate_limit.check_failed fail_open=dev error=%s", type(exc).__name__)
 
     def reset(self, key: str) -> None:
         try:

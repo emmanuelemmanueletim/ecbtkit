@@ -1,12 +1,9 @@
-"""
-Production configuration validation.
-
-Call at startup (or via CLI) to reject unsafe deployments.
-"""
+"""Production configuration validation — fail fast on unsafe settings."""
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
+from urllib.parse import urlparse
 
 from ecbtkit.core.config import Settings, get_settings
 
@@ -17,13 +14,9 @@ class ProductionCheckError(Exception):
         super().__init__("; ".join(problems))
 
 
-def validate_production_settings(settings: Settings | None = None) -> List[str]:
-    """
-    Return a list of problems. Empty list = safe for production.
-    """
+def validate_production_settings(settings: Optional[Settings] = None) -> List[str]:
     s = settings or get_settings()
     problems: List[str] = []
-
     if not s.is_production:
         return problems
 
@@ -31,26 +24,38 @@ def validate_production_settings(settings: Settings | None = None) -> List[str]:
         problems.append("ECBT_DEBUG must be false in production")
 
     key = s.secret_key or ""
-    if len(key) < 32 or key.startswith("INSECURE") or key.startswith("change-me"):
-        problems.append("ECBT_SECRET_KEY must be a strong random secret (≥32 chars)")
+    if len(key) < 32 or any(
+        key.lower().startswith(p) for p in ("insecure", "change-me", "secret", "password")
+    ):
+        problems.append("ECBT_SECRET_KEY must be a strong random secret (≥32 characters)")
 
     url = (s.database_url or "").lower()
     if url.startswith("sqlite"):
-        problems.append("SQLite is not recommended for production — use PostgreSQL or MySQL")
+        problems.append("SQLite is not supported in production — use PostgreSQL or MySQL")
 
     if "*" in (s.cors_origins or []) and s.cors_allow_credentials:
-        problems.append("Wildcard CORS with credentials is unsafe — set explicit ECBT_CORS_ORIGINS")
+        problems.append("Wildcard CORS with credentials is unsafe — set explicit origins")
+
+    if s.rate_limit_enabled and not getattr(s, "redis_url", None):
+        problems.append("ECBT_REDIS_URL is required in production when rate limiting is enabled")
 
     if getattr(s, "mail_enabled", False):
         if not s.mail_from:
             problems.append("ECBT_MAIL_FROM is required when email is enabled")
-        if (s.mail_provider or "null") in ("null", "none", ""):
+        if (s.mail_provider or "null").lower() in ("null", "none", ""):
             problems.append("ECBT_MAIL_PROVIDER must be set when email is enabled")
+        base = getattr(s, "mail_link_base_url", "") or ""
+        parsed = urlparse(base)
+        if parsed.scheme != "https":
+            problems.append("ECBT_MAIL_LINK_BASE_URL must use https in production")
+
+    if getattr(s, "database_auto_create", False):
+        problems.append("ECBT_DATABASE_AUTO_CREATE must be false in production — use Alembic")
 
     return problems
 
 
-def assert_production_safe(settings: Settings | None = None) -> None:
+def assert_production_safe(settings: Optional[Settings] = None) -> None:
     problems = validate_production_settings(settings)
     if problems:
         raise ProductionCheckError(problems)

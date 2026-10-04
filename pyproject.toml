@@ -12,7 +12,7 @@ license = {text = "MIT"}
 authors = [{name = "Emmanuel Emmanuel Etim", email = "emmanuel224etim089@gmail.com"}]
 keywords = ["cbt", "examination", "assessment", "auth", "api-framework"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
