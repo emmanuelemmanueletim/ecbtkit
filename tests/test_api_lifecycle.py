@@ -7,6 +7,8 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from starlette.testclient import TestClient
+from starlette.responses import JSONResponse
+from starlette.routing import Route
 
 from ecbtkit.core.app import CBT
 from ecbtkit.core.config import Settings, set_settings, get_settings
@@ -136,6 +138,25 @@ class ExamLifecycleHTTPTests(unittest.TestCase):
         self.assertEqual(subject_list.status_code, 403, subject_list.text)
         create_exam = self.client.post("/api/v1/exams", headers=headers, json={"title": "No"})
         self.assertEqual(create_exam.status_code, 403, create_exam.text)
+
+    def test_custom_routes_and_router_prefix_are_mounted_under_api_prefix(self):
+        async def custom_endpoint(request):
+            return JSONResponse({"route": "custom"})
+
+        self.cbt.add_route("/custom/one", custom_endpoint)
+        self.cbt.include_router([Route("/two", custom_endpoint)], prefix="custom")
+        first = self.client.get("/api/v1/custom/one")
+        second = self.client.get("/api/v1/custom/two")
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(second.status_code, 200, second.text)
+        self.assertEqual(first.json(), {"route": "custom"})
+
+    def test_custom_routes_cannot_shadow_builtin_routes(self):
+        async def shadow(request):
+            return JSONResponse({"shadowed": True})
+
+        with self.assertRaisesRegex(ValueError, "conflicts"):
+            self.cbt.add_route("/auth/signup", shadow, methods=["POST"])
 
     def test_signup_cannot_assign_staff_roles(self):
         for role in ("examiner", "administrator"):

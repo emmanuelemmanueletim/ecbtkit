@@ -16,6 +16,21 @@ app.add_route("/custom/hello", hello, methods=["GET"])
 app.run()
 ```
 
+This is available at `/api/v1/custom/hello` by default. `include_router` accepts
+Starlette `Route` objects and applies both the API prefix and an optional route
+prefix:
+
+```python
+from starlette.routing import Route
+
+app.include_router([Route("/hello", hello, methods=["GET"])], prefix="custom")
+```
+
+Custom routes run inside the same app middleware, but the framework does not
+automatically authenticate or authorize them. Protect private endpoints with
+`get_current_user` and `require_roles`, or your own authentication checks. Paths
+that conflict with built-in routes are rejected.
+
 ## Custom middleware
 
 ```python

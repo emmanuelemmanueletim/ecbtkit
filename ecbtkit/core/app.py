@@ -213,12 +213,10 @@ class CBT:
 
 
     def add_route(self, path: str, endpoint, methods: list | None = None, **kwargs):
-        """Mount a custom route on the API prefix."""
+        """Add an API route after the built-in routes so it cannot shadow them."""
         from starlette.routing import Route
         methods = methods or ["GET"]
-        full = f"{self.settings.api_prefix.rstrip('/')}/{path.lstrip('/')}"
-        self._app.routes.insert(0, Route(full, endpoint, methods=methods, **kwargs))
-        return self
+        return self.include_router([Route(path, endpoint, methods=methods, **kwargs)])
 
     def add_middleware(self, middleware_cls, **kwargs):
         """Add Starlette middleware."""
@@ -226,13 +224,33 @@ class CBT:
         return self
 
     def include_router(self, routes: list, prefix: str = ""):
-        """Include a list of Starlette Route objects under optional prefix."""
-        from starlette.routing import Mount
-        if prefix:
-            self._app.routes.insert(0, Mount(prefix, routes=routes))
-        else:
-            for r in routes:
-                self._app.routes.insert(0, r)
+        """Include Starlette routes under the API prefix and optional path prefix."""
+        from starlette.routing import Mount, Route
+
+        sub = prefix.strip("/")
+        mount = next((
+            item for item in self._app.routes
+            if isinstance(item, Mount) and item.path.rstrip("/") == self.settings.api_prefix.rstrip("/")
+        ), None)
+        if mount is None:
+            raise RuntimeError("The configured API mount could not be found")
+        for route in routes:
+            if not isinstance(route, Route):
+                raise TypeError("include_router expects a list of Starlette Route objects")
+            path = route.path.lstrip("/")
+            combined = "/".join(part for part in (sub, path) if part)
+            full_path = f"/{combined}" if combined else "/"
+            if any(existing.path == full_path and existing.methods & route.methods for existing in mount.routes if isinstance(existing, Route)):
+                raise ValueError(f"Route conflicts with an existing API path: {full_path}")
+            mount.routes.append(Route(
+                full_path,
+                route.endpoint,
+                methods=route.methods,
+                name=route.name,
+                include_in_schema=getattr(route, "include_in_schema", True),
+                middleware=getattr(route, "middleware", None),
+                max_body_size=getattr(route, "max_body_size", None),
+            ))
         return self
 
     def run(self, host: Optional[str] = None, port: Optional[int] = None, **kwargs: Any) -> None:

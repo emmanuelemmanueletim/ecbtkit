@@ -158,6 +158,8 @@ class AuthVerificationTests(unittest.TestCase):
         body = r.json()
         self.assertNotIn("token", body)
         self.assertNotIn("debug_reset_token", body)
+        self.db.refresh(user)
+        self.assertIsNone(user.reset_token_hash)
 
         r2 = self.client.post("/api/v1/auth/forgot-password", json={"email": "nobody@example.test"})
         self.assertEqual(r2.status_code, 200, r2.text)
@@ -247,6 +249,13 @@ class ProductionRateLimitConfigTests(unittest.TestCase):
         problems = validate_production_settings(settings)
         self.assertTrue(any("TRUSTED_HOSTS" in item for item in problems))
         self.assertTrue(any("FORCE_HTTPS" in item for item in problems))
+
+    def test_production_rejects_email_configuration_that_builds_null_provider(self):
+        from ecbtkit.ops.production import validate_production_settings
+
+        settings = self._safe_production_settings(mail_host=None)
+        problems = validate_production_settings(settings)
+        self.assertTrue(any("MAIL_HOST" in item for item in problems))
 
     def test_production_app_refuses_unsafe_configuration(self):
         settings = self._safe_production_settings(force_https=False)

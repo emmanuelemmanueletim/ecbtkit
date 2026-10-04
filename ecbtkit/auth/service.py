@@ -258,6 +258,10 @@ class AuthService:
 
     def request_password_reset(self, email: str) -> None:
         """Always same external behaviour — no account enumeration. Token never returned."""
+        if not self.settings.mail_enabled or (self.settings.mail_provider or "null").lower() in {
+            "null", "none", "off", ""
+        }:
+            return
         email = email.strip().lower()
         token = generate_secure_token(32)
         user = self.db.query(User).filter(User.email == email).first()

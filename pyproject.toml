@@ -26,7 +26,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Application Frameworks",
 ]
 dependencies = [
-    "starlette>=0.37.0",
+    "starlette>=1.1.0",
     "uvicorn[standard]>=0.27.0",
     "sqlalchemy>=2.0.36",
     "pydantic>=2.5.0",

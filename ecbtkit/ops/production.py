@@ -44,10 +44,19 @@ def validate_production_settings(settings: Optional[Settings] = None) -> List[st
     if not s.mail_enabled:
         problems.append("ECBT_MAIL_ENABLED must be true in production for account recovery")
     if s.mail_enabled:
+        provider = (s.mail_provider or "null").strip().lower()
         if not s.mail_from:
             problems.append("ECBT_MAIL_FROM is required when email is enabled")
-        if (s.mail_provider or "null").lower() in ("null", "none", "", "off"):
+        if provider in ("null", "none", "", "off"):
             problems.append("ECBT_MAIL_PROVIDER must be set when email is enabled")
+        if provider == "smtp" and not s.mail_host:
+            problems.append("ECBT_MAIL_HOST is required for the smtp provider")
+        if provider in {"sendgrid", "resend"} and not (s.mail_api_key or (s.mail_username and s.mail_password)):
+            problems.append(f"SMTP credentials or ECBT_MAIL_API_KEY are required for {provider}")
+        if provider in {"ses", "mailgun", "postmark", "gmail", "office365"}:
+            has_credentials = bool((s.mail_username and s.mail_password) or s.mail_api_key)
+            if not has_credentials:
+                problems.append(f"SMTP credentials are required for the {provider} provider")
         base = getattr(s, "mail_link_base_url", "") or ""
         parsed = urlparse(base)
         if parsed.scheme != "https":
