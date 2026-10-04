@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     # Application
     app_name: str = "eCBTKit"
-    app_version: str = "0.1.0"
+    app_version: str = "0.1.1"
     debug: bool = False
     environment: str = "development"
 

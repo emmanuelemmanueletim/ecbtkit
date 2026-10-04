@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ecbtkit"
-version = "0.1.0"
+version = "0.1.1"
 description = "Starlette-based Python framework for computer-based tests and online examinations"
 readme = "README.md"
 requires-python = ">=3.10"
